@@ -74,6 +74,26 @@
   animation: details-show 300ms ease-in-out;
 }
 
+@keyframes scanner {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-scanner-slow {
+  animation: scanner 3s ease infinite;
+}
+
+.animate-scanner-fast {
+  animation: scanner 1.5s ease infinite;
+}
+
 @media (max-width: 480px) {
   .btn-primary,
   .btn-secondary,

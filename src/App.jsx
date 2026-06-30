@@ -619,6 +619,47 @@ function App() {
           )}
         </div>
 
+        {/* Barre de réflexion de l'IA juste sous l'écran de la caméra */}
+        {activeFeature && (
+          <div className="w-full max-w-3xl -mt-2 mb-2 px-1">
+            <div className="relative w-full h-1.5 bg-[#050818] rounded-full overflow-hidden border border-violet-500/20 shadow-inner">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${
+                  activeFeature === "loading"
+                    ? "bg-gradient-to-r from-violet-500 via-fuchsia-500 to-violet-500 animate-pulse w-full"
+                    : gameState === "detecting"
+                    ? "bg-gradient-to-r from-violet-600 via-fuchsia-500 to-violet-600 animate-scanner-slow w-full"
+                    : gameState === "playing"
+                    ? "bg-gradient-to-r from-violet-500 via-cyan-400 to-fuchsia-500 animate-scanner-fast w-full"
+                    : "bg-slate-700/50 w-full"
+                }`}
+                style={{
+                  backgroundSize: "200% 100%"
+                }}
+              ></div>
+            </div>
+            <div className="flex justify-between items-center mt-1.5 text-[10px] uppercase tracking-wider font-extrabold text-violet-300">
+              <span className="flex items-center gap-1.5">
+                <span className={`w-2 h-2 rounded-full ${activeFeature === "loading" || gameState === "detecting" || gameState === "playing" ? "bg-fuchsia-500 animate-ping" : "bg-slate-600"}`}></span>
+                IA : {
+                  activeFeature === "loading"
+                    ? "Initialisation & Chargement..."
+                    : gameState === "detecting"
+                    ? "Recherche de la chorégraphie..."
+                    : gameState === "playing"
+                    ? "Analyse de danse active..."
+                    : "En veille"
+                }
+              </span>
+              {(gameState === "playing" || gameState === "detecting") && (
+                <span className="text-cyan-400">
+                  Précision : {Math.round(dancePrecision)}%
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Contrôles simples */}
         {activeFeature && activeFeature !== "loading" && (
           <div className="flex gap-4">

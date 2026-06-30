@@ -42,6 +42,18 @@ function distance(p1, p2) {
   return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
 }
 
+/**
+ * Calcule la largeur des épaules à l'écran pour servir de base de distance relative.
+ */
+export function getShoulderWidth(kps) {
+  if (!kps || kps.length < 17) return 100;
+  const left = kps[KP.leftShoulder];
+  const right = kps[KP.rightShoulder];
+  if (!left || !right || left.score < 0.15 || right.score < 0.15) return 100;
+  const dist = distance(left, right);
+  return dist > 10 ? dist : 100;
+}
+
 // Définitions des poses de référence (chorégraphies) par leurs angles clés cibles (en degrés)
 export const DANCE_POSES = {
   // Poses pour Rasputin
@@ -73,9 +85,10 @@ export const DANCE_POSES = {
         leftShoulder: 80
       },
       check: (kps) => {
-        // Poignets croisés devant la poitrine (proches des coudes opposés)
-        return distance(kps[KP.rightWrist], kps[KP.leftElbow]) < 120 && 
-               distance(kps[KP.leftWrist], kps[KP.rightElbow]) < 120;
+        // Poignets croisés devant la poitrine
+        const sw = getShoulderWidth(kps);
+        return distance(kps[KP.rightWrist], kps[KP.leftElbow]) < sw * 1.1 && 
+               distance(kps[KP.leftWrist], kps[KP.rightElbow]) < sw * 1.1;
       },
       tips: {
         rightShoulder: "Garde tes coudes à hauteur de poitrine !",
@@ -92,8 +105,9 @@ export const DANCE_POSES = {
       },
       check: (kps) => {
         // Poignets alignés horizontalement avec les épaules
-        return Math.abs(kps[KP.rightWrist].y - kps[KP.rightShoulder].y) < 100 &&
-               Math.abs(kps[KP.leftWrist].y - kps[KP.leftShoulder].y) < 100;
+        const sw = getShoulderWidth(kps);
+        return Math.abs(kps[KP.rightWrist].y - kps[KP.rightShoulder].y) < sw * 0.8 &&
+               Math.abs(kps[KP.leftWrist].y - kps[KP.leftShoulder].y) < sw * 0.8;
       },
       tips: {
         rightShoulder: "Tends tes deux bras bien à l'horizontale !",
@@ -112,8 +126,9 @@ export const DANCE_POSES = {
         leftShoulder: 40
       },
       check: (kps) => {
-        return distance(kps[KP.rightWrist], kps[KP.rightHip]) < 100 &&
-               distance(kps[KP.leftWrist], kps[KP.leftHip]) < 100;
+        const sw = getShoulderWidth(kps);
+        return distance(kps[KP.rightWrist], kps[KP.rightHip]) < sw * 0.9 &&
+               distance(kps[KP.leftWrist], kps[KP.leftHip]) < sw * 0.9;
       },
       tips: {
         rightElbow: "Pose tes mains sur tes hanches et plie les coudes !",
@@ -129,8 +144,9 @@ export const DANCE_POSES = {
         leftShoulder: 90
       },
       check: (kps) => {
-        // Poignets proches l'un de l'autre et à hauteur d'épaules
-        return distance(kps[KP.rightWrist], kps[KP.leftWrist]) < 150 &&
+        const sw = getShoulderWidth(kps);
+        // Poignets proches l'un de l'autre
+        return distance(kps[KP.rightWrist], kps[KP.leftWrist]) < sw * 1.2 &&
                kps[KP.rightWrist].y < kps[KP.rightHip].y;
       },
       tips: {
@@ -145,7 +161,8 @@ export const DANCE_POSES = {
         rightShoulder: 120
       },
       check: (kps) => {
-        return distance(kps[KP.rightWrist], kps[KP.rightEar]) < 100;
+        const sw = getShoulderWidth(kps);
+        return distance(kps[KP.rightWrist], kps[KP.rightEar]) < sw * 0.9;
       },
       tips: {
         rightShoulder: "Mets ta main droite derrière ton oreille droite !",
@@ -202,7 +219,7 @@ export function evaluateUserPose(kps, referenceVideoId) {
         validAnglesCount++;
 
         // Si l'écart sur cette articulation est grand, générer un conseil
-        if (diff > 35 && pose.tips[joint]) {
+        if (diff > 40 && pose.tips[joint]) {
           tipsList.push(pose.tips[joint]);
         }
       }
@@ -211,7 +228,7 @@ export function evaluateUserPose(kps, referenceVideoId) {
     if (validAnglesCount > 0) {
       const averageDiff = angleDiffSum / validAnglesCount;
       // Convertir la différence d'angles en pourcentage de précision (écart max toléré 60°)
-      const precision = Math.max(0, Math.min(100, Math.round(100 - (averageDiff / 60) * 100)));
+      const precision = Math.max(0, Math.min(100, Math.round(100 - (averageDiff / 65) * 100)));
 
       // Si l'utilisateur effectue le "check" logique de la pose, on booste la confiance de détection
       const matchesLogic = pose.check ? pose.check(kps) : true;
@@ -231,11 +248,11 @@ export function evaluateUserPose(kps, referenceVideoId) {
     let rating = { text: "RATÉ", color: "text-red-500" };
     let comment = detectedTips[0] || `Continue ainsi sur la pose "${bestPoseMatch.name}" !`;
 
-    if (highestSimilarity >= 85) {
+    if (highestSimilarity >= 80) {
       scoreGained = 150;
       rating = { text: "PARFAIT !", color: "text-emerald-400 font-extrabold" };
       comment = `Félicitations ! Pose "${bestPoseMatch.name}" exécutée avec brio.`;
-    } else if (highestSimilarity >= 65) {
+    } else if (highestSimilarity >= 60) {
       scoreGained = 80;
       rating = { text: "PRESQUE", color: "text-amber-400" };
     } else {
@@ -264,7 +281,6 @@ export function evaluateUserPose(kps, referenceVideoId) {
 /**
  * Analyse la pose en direct pour identifier automatiquement quel style ou chorégraphie
  * l'utilisateur est en train d'exécuter.
- * Retourne le nom de la danse détectée (ex: "Rasputin", "Macarena", "Never Gonna Give You Up") ou null.
  */
 export function detectDanceStyle(kps) {
   if (!kps || kps.length < 17) return null;
@@ -280,22 +296,24 @@ export function detectDanceStyle(kps) {
     return null;
   }
 
+  const sw = getShoulderWidth(kps);
+
   // 1. Détection de Rasputin (Bras croisés)
   const distRightWristLeftElbow = distance(kps[KP.rightWrist], kps[KP.leftElbow]);
   const distLeftWristRightElbow = distance(kps[KP.leftWrist], kps[KP.rightElbow]);
-  if (distRightWristLeftElbow < 120 && distLeftWristRightElbow < 120 && rightShoulder > 60 && leftShoulder > 60) {
+  if (distRightWristLeftElbow < sw * 1.15 && distLeftWristRightElbow < sw * 1.15 && rightShoulder > 50 && leftShoulder > 50) {
     return "Rasputin";
   }
 
   // 2. Détection de la Macarena (Mains sur les hanches)
   const distRightWristRightHip = distance(kps[KP.rightWrist], kps[KP.rightHip]);
   const distLeftWristLeftHip = distance(kps[KP.leftWrist], kps[KP.leftHip]);
-  if (distRightWristRightHip < 100 && distLeftWristLeftHip < 100 && rightElbow < 60 && leftElbow < 60) {
+  if (distRightWristRightHip < sw * 1.0 && distLeftWristLeftHip < sw * 1.0 && rightElbow < 70 && leftElbow < 70) {
     return "Macarena";
   }
 
   // 3. Détection de Rickroll / Never Gonna Give You Up (Bras droit levé, coude gauche plié)
-  if (kps[KP.rightWrist].y < kps[KP.rightShoulder].y && rightShoulder > 130 && leftElbow < 60 && kps[KP.leftWrist].y > kps[KP.leftHip].y) {
+  if (kps[KP.rightWrist].y < kps[KP.rightShoulder].y && rightShoulder > 120 && leftElbow < 75 && kps[KP.leftWrist].y > kps[KP.leftHip].y) {
     return "Never Gonna Give You Up";
   }
 

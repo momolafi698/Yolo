@@ -21,10 +21,10 @@ const DEFAULT_MODEL_CONFIG = {
   overlaySize: [640, 640],
   iouThreshold: 0.35,
   scoreThreshold: 0.45,
-  backend: "wasm",
+  backend: "webgpu",
   numThreads: 1,
-  enableNMS: true,
-  model: "yolo11n",
+  enableNMS: false,
+  model: "yolo26s",
   modelPath: "",
   task: "pose",
   imgszType: "dynamic",
@@ -646,153 +646,6 @@ function App() {
         )}
       </main>
 
-      {/* ZONE BASSE : Structure en 3 colonnes */}
-      <section className="captor-grid">
-        
-        {/* Colonne 1 : Vidéo Référence */}
-        <div className="card-violet flex flex-col gap-3">
-          <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2 flex items-center gap-2">
-            📺 Vidéo de Référence
-          </h2>
-
-          {/* Sélecteur de Plateforme Source */}
-          <div className="flex bg-[#050818] p-1 rounded-lg border border-violet-500/20 w-full mb-1">
-            <button
-              onClick={() => {
-                setDanceSourcePlatform("youtube");
-                if (detectedDanceName) {
-                  setCoachComments((prev) => [`🔄 Passage sur YouTube. Recherche en cours...`, ...prev].slice(0, 5));
-                  setIsSearchingWeb(true);
-                  setGameState("detecting");
-                  searchDanceVideoOnWeb(detectedDanceName, "youtube").then((res) => {
-                    if (res && res.videoId) {
-                      setReferenceVideoId(res.videoId);
-                      setGameState("playing");
-                      setCoachComments((prev) => [`🎵 Vidéo YouTube chargée : "${res.title}"`, ...prev].slice(0, 5));
-                    }
-                    setIsSearchingWeb(false);
-                  }).catch(() => setIsSearchingWeb(false));
-                }
-              }}
-              className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
-                danceSourcePlatform === "youtube"
-                  ? "bg-red-600 text-white shadow-md shadow-red-900/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              🔴 YouTube
-            </button>
-            <button
-              onClick={() => {
-                setDanceSourcePlatform("tiktok");
-                if (detectedDanceName) {
-                  setCoachComments((prev) => [`🔄 Passage sur TikTok. Recherche en cours...`, ...prev].slice(0, 5));
-                  setIsSearchingWeb(true);
-                  setGameState("detecting");
-                  searchDanceVideoOnWeb(detectedDanceName, "tiktok").then((res) => {
-                    if (res && res.videoId) {
-                      setReferenceVideoId(res.videoId);
-                      setGameState("playing");
-                      setCoachComments((prev) => [`🎵 Vidéo TikTok chargée : "${res.title}"`, ...prev].slice(0, 5));
-                    }
-                    setIsSearchingWeb(false);
-                  }).catch(() => setIsSearchingWeb(false));
-                }
-              }}
-              className={`flex-1 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
-                danceSourcePlatform === "tiktok"
-                  ? "bg-black text-cyan-400 border border-cyan-500/30 shadow-md shadow-cyan-950/30"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              ⚫ TikTok
-            </button>
-          </div>
-
-          {referenceVideoId ? (
-            <div className="aspect-video bg-black rounded-lg overflow-hidden border border-violet-950">
-              <iframe
-                width="100%"
-                height="100%"
-                src={`https://www.youtube.com/embed/${referenceVideoId}?autoplay=1&mute=1&loop=1&playlist=${referenceVideoId}`}
-                title="YouTube video player"
-                frameBorder="0"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              ></iframe>
-            </div>
-          ) : (
-            <div className="aspect-video bg-[#050818]/60 rounded-lg border border-violet-950/40 flex flex-col items-center justify-center p-4 text-center">
-              {isSearchingWeb ? (
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-8 h-8 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-xs text-violet-400 font-bold animate-pulse">
-                    Recherche web pour "{detectedDanceName}"...
-                  </p>
-                </div>
-              ) : (
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  L'IA attend votre premier geste (ex: mains sur les hanches pour la Macarena, ou bras croisés pour Rasputin) pour rechercher la vidéo sur le web.
-                </p>
-              )}
-            </div>
-          )}
-
-        </div>
-
-        {/* Colonne 2 : Résultat de l'épreuve */}
-        <div className="card-violet flex flex-col justify-between gap-4">
-          <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
-            📊 Résultat de l'épreuve
-          </h2>
-          <div className="flex flex-col items-center justify-center py-2 flex-grow gap-3">
-            {/* Score */}
-            <div className="text-center">
-              <span className="text-xs uppercase tracking-wider text-slate-400 block font-bold">Score</span>
-              <span className="text-5xl font-black text-violet-400 text-violet-neon">
-                {danceScore} <span className="text-lg font-bold text-slate-300">pts</span>
-              </span>
-            </div>
-
-            {/* Pourcentage */}
-            <div className="text-center w-full max-w-[180px] mt-2">
-              <span className="text-xs uppercase tracking-wider text-slate-400 block mb-1 font-bold">Précision</span>
-              <div className="w-full bg-[#050818] rounded-full h-3 border border-violet-500/20 overflow-hidden">
-                <div
-                  className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-full rounded-full transition-all duration-300"
-                  style={{ width: `${dancePrecision}%` }}
-                ></div>
-              </div>
-              <span className="text-xl font-bold text-slate-200 mt-1 block">
-                {dancePrecision}%
-              </span>
-            </div>
-
-            {/* Feedback dynamique en couleur */}
-            <div className={`mt-2 font-black text-3xl uppercase tracking-widest ${performanceRating.color}`}>
-              {performanceRating.text}
-            </div>
-          </div>
-        </div>
-
-        {/* Colonne 3 : Commentaires & Améliorations */}
-        <div className="card-violet flex flex-col gap-3">
-          <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2 flex items-center gap-2">
-            💬 Commentaires du Coach
-          </h2>
-          <div className="flex-grow overflow-y-auto max-h-[200px] flex flex-col gap-2 pr-1 custom-scrollbar">
-            {coachComments.map((comment, index) => (
-              <div
-                key={index}
-                className="bg-[#050818]/60 border-l-2 border-violet-500 px-3 py-2 text-sm text-slate-300 rounded-r-md animate-details-show"
-              >
-                {comment}
-              </div>
-            ))}
-          </div>
-        </div>
-
-      </section>
 
       {/* PARAMÈTRES AVANCÉS REPLIABLES (Pour garder l'accès au backend et aux stats) */}
       <footer className="mt-4 border-t border-violet-500/10 pt-4 flex flex-col items-center">

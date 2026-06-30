@@ -11,8 +11,12 @@ const SettingsPanel = memo(function SettingsPanel({
   defaultClasses,
   loadModel,
 }) {
-  const [nmsEnabled, setNmsEnabled] = useState(true);
-  const [nmsLocked, setNmsLocked] = useState(true);
+  const defaultModel = modelConfigRef.current?.model || "yolo11n";
+  const isYolo26 = defaultModel.startsWith("yolo26");
+  const isYolo11Or12 = defaultModel.startsWith("yolo11") || defaultModel.startsWith("yolo12");
+
+  const [nmsEnabled, setNmsEnabled] = useState(!isYolo26);
+  const [nmsLocked, setNmsLocked] = useState(isYolo26 || isYolo11Or12);
   const threadTimeoutRef = useRef(null);
 
   const handleThreadChange = (e) => {
@@ -65,6 +69,7 @@ const SettingsPanel = memo(function SettingsPanel({
             <div className="flex flex-col">
               <label className={labelClass}>Task</label>
               <select
+                defaultValue={modelConfigRef.current.task}
                 onChange={(e) => {
                   modelConfigRef.current.task = e.target.value;
                   loadModel();
@@ -81,6 +86,7 @@ const SettingsPanel = memo(function SettingsPanel({
             <div className="flex flex-col">
               <label className={labelClass}>Model</label>
               <select
+                defaultValue={modelConfigRef.current.model}
                 onChange={(e) => {
                   const selectedModel = e.target.value;
                   modelConfigRef.current.model = selectedModel;
@@ -196,6 +202,7 @@ const SettingsPanel = memo(function SettingsPanel({
             <div className="flex flex-col">
               <label className={labelClass}>Backend</label>
               <select
+                defaultValue={modelConfigRef.current.backend}
                 onChange={(e) => {
                   modelConfigRef.current.backend = e.target.value;
                   loadModel();
@@ -251,8 +258,9 @@ const SettingsPanel = memo(function SettingsPanel({
               <select
                 disabled={activeFeature !== null}
                 ref={imgszTypeSelectorRef}
+                defaultValue={modelConfigRef.current.imgszType}
                 onChange={(e) => {
-                  modelConfigRef.current.imgsz_type = e.target.value;
+                  modelConfigRef.current.imgszType = e.target.value;
                 }}
                 className={inputClass}
               >

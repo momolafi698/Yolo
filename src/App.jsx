@@ -24,7 +24,7 @@ const DEFAULT_MODEL_CONFIG = {
   backend: "wasm",
   numThreads: 1,
   enableNMS: true,
-  model: "yolo11n",
+  model: "yolo26s",
   modelPath: "",
   task: "pose",
   imgszType: "dynamic",

@@ -2,10 +2,17 @@ import React, { memo } from "react";
 
 const ImageDisplay = memo(function ImageDisplay({
   cameraRef,
+  videoRef,
   imgRef,
   overlayRef,
   imgSrc,
+  videoSrc,
   onCameraLoad,
+  onVideoLoad,
+  onVideoPlay,
+  onVideoPause,
+  onVideoSeeked,
+  onVideoEnded,
   onImageLoad,
   activeFeature,
 }) {
@@ -23,7 +30,11 @@ const ImageDisplay = memo(function ImageDisplay({
               className={`w-2 h-2 rounded-full ${activeFeature === "camera" ? "bg-red-500 animate-pulse" : "bg-violet-500"}`}
             ></span>
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-300">
-              {activeFeature === "camera" ? "Live Stream" : "Static Image"}
+              {activeFeature === "camera"
+                ? "Live Stream"
+                : activeFeature === "video"
+                  ? "Video Source"
+                  : "Static Image"}
             </span>
           </div>
         )}
@@ -57,30 +68,46 @@ const ImageDisplay = memo(function ImageDisplay({
         )}
 
         <div className="relative w-full h-full flex items-center justify-center" hidden={activeFeature === null}>
-          <video
-            className="max-h-[600px] w-full object-contain"
-            ref={cameraRef}
-            onLoadedMetadata={onCameraLoad}
-            hidden={activeFeature !== "camera"}
-            autoPlay
-            playsInline
-            muted
-          />
-          <img
-            id="img"
-            ref={imgRef}
-            src={imgSrc}
-            onLoad={onImageLoad}
-            hidden={activeFeature !== "image"}
-            className="max-h-[600px] w-full object-contain"
-            alt="Source"
-          />
-          <canvas
-            ref={overlayRef}
-            hidden={activeFeature === null}
-            className="absolute top-0 left-0 w-full h-full pointer-events-none"
-            style={{ objectFit: "contain" }}
-          ></canvas>
+          <div className="relative w-full max-h-[600px] flex items-center justify-center">
+            <video
+              className="block max-h-[600px] w-full object-contain"
+              ref={cameraRef}
+              onLoadedMetadata={onCameraLoad}
+              hidden={activeFeature !== "camera"}
+              autoPlay
+              playsInline
+              muted
+            />
+            <video
+              className="block max-h-[600px] w-full object-contain"
+              ref={videoRef}
+              src={videoSrc}
+              onLoadedMetadata={onVideoLoad}
+              onLoadedData={onVideoLoad}
+              onPlay={onVideoPlay}
+              onPause={onVideoPause}
+              onSeeked={onVideoSeeked}
+              onEnded={onVideoEnded}
+              hidden={activeFeature !== "video"}
+              controls
+              playsInline
+            />
+            <img
+              id="img"
+              ref={imgRef}
+              src={imgSrc}
+              onLoad={onImageLoad}
+              hidden={activeFeature !== "image"}
+              className="block max-h-[600px] w-full object-contain"
+              alt="Source"
+            />
+            <canvas
+              ref={overlayRef}
+              hidden={activeFeature === null}
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              style={{ objectFit: "contain" }}
+            ></canvas>
+          </div>
         </div>
       </div>
     </div>

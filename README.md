@@ -6,7 +6,7 @@
 <br>
 
 [![ONNX Runtime Web](https://img.shields.io/badge/ONNX%20Runtime-Web-blue)](https://onnxruntime.ai/)
-[![YOLO](https://img.shields.io/badge/YOLO-v11%2Fv12-green)](https://github.com/ultralytics/ultralytics)
+[![YOLO](https://img.shields.io/badge/YOLO-26s-green)](https://github.com/ultralytics/ultralytics)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 </div>
@@ -43,18 +43,11 @@ To achieve the best performance using **WebGPU**, please ensure the following:
 | 📹 **Video**       |   MP4    | Offline video analysis & content review.  |
 | 📺 **Live Camera** |  Stream  | Real-time monitoring & interactive demos. |
 
-## 📊 Supported Models
+## 📊 Model
 
-| Model        | Input Size | Params | mAP<sup>val<br>50-95 | Speed (ms)<br><sup>T4 TensorRT10 | Recommended For       |
-| :----------- | :--------- | :----- | :------------------- | :------------------------------- | :-------------------- |
-| **YOLO11-N** | 640        | 2.6M   | 39.5                 | 1.5                              | 📱 Mobile / Real-time |
-| **YOLO11-S** | 640        | 9.4M   | 47.0                 | 2.5                              | 🖥️ High Accuracy      |
-| **YOLO12-N** | 640        | 2.6M   | 40.6                 | 1.64                             | 📱 Mobile / Real-time |
-| **YOLO12-S** | 640        | 9.3M   | 48.0                 | 2.61                             | 🖥️ High Accuracy      |
-| **YOLO26-N** | 640        | 2.4M   | 40.9                 | 1.70                             | 📱 Mobile / Real-time |
-| **YOLO12-S** | 640        | 9.M    | 48.6                 | 2.5                              | 🖥️ High Accuracy      |
+This project is fixed to **YOLO26-s**. The browser app and catalogue extractor both load YOLO26-s ONNX files from `public/models/`.
 
-_Models are licensed under [AGPL-3.0](./public/models/LICENSE.txt) via [Ultralytics](https://github.com/ultralytics/ultralytics)._
+_The model is licensed under [AGPL-3.0](./public/models/LICENSE.txt) via [Ultralytics](https://github.com/ultralytics/ultralytics)._
 
 ## 🛠️ Installation
 
@@ -82,45 +75,9 @@ _Models are licensed under [AGPL-3.0](./public/models/LICENSE.txt) via [Ultralyt
    yarn build
    ```
 
-## 🔧 Custom Models Guide
+## 🔧 Classes
 
-You can run your own YOLO models in this app.
-
-### Step 1: Export to ONNX
-
-Use Ultralytics to export your model. **Crucial:** Use `opset=12` for WebGPU compatibility.
-
-```python
-from ultralytics import YOLO
-
-model = YOLO("path/to/your/model.pt")
-# Export with opset=12 and dynamic shape
-model.export(format="onnx", opset=12, dynamic=True)
-```
-
-### Step 2: Load your Model
-
-You have two ways to load your model:
-
-#### Option A: Quick Test (UI Upload)
-
-Simply click the **"Add model"** button in the web interface to upload your `.onnx` file temporarily.
-
-#### Option B: Permanent Integration (Code)
-
-1. Copy your `.onnx` file to `./public/models/`.
-2. Edit `App.jsx` to add your model to the list:
-
-```jsx
-<select name="model-selector">
-  <option value="yolo11n">yolo11n-2.6M</option>
-  <option value="your-custom-model">Your Custom Model</option>
-</select>
-```
-
-### Step 3: Update Classes
-
-If your model uses custom classes (not COCO), you need to update the class definitions:
+If you need custom class labels, update the class definitions:
 
 - **UI Method**: Click **"Add Classes.json"** to upload a JSON file mapping class IDs to names.
 - **Code Method**: Update `src/utils/yolo_classes.json`.

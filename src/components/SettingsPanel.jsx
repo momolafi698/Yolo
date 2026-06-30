@@ -1,22 +1,16 @@
-import { memo, useRef, useState } from "react";
+import { memo, useRef } from "react";
 
 const SettingsPanel = memo(function SettingsPanel({
   cameraSelectorRef,
   imgszTypeSelectorRef,
   modelConfigRef,
+  defaultModelConfig,
   customClasses,
   cameras,
-  customModels,
   activeFeature,
   defaultClasses,
   loadModel,
 }) {
-  const defaultModel = modelConfigRef.current?.model || "yolo11n";
-  const isYolo26 = defaultModel.startsWith("yolo26");
-  const isYolo11Or12 = defaultModel.startsWith("yolo11") || defaultModel.startsWith("yolo12");
-
-  const [nmsEnabled, setNmsEnabled] = useState(!isYolo26);
-  const [nmsLocked, setNmsLocked] = useState(isYolo26 || isYolo11Or12);
   const threadTimeoutRef = useRef(null);
 
   const handleThreadChange = (e) => {
@@ -66,10 +60,17 @@ const SettingsPanel = memo(function SettingsPanel({
             Model Configuration
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="flex flex-col sm:col-span-2">
+              <label className={labelClass}>Model</label>
+              <div className={`${inputClass} text-slate-300`}>
+                YOLO26-s
+              </div>
+            </div>
+
             <div className="flex flex-col">
               <label className={labelClass}>Task</label>
               <select
-                defaultValue={modelConfigRef.current.task}
+                defaultValue={defaultModelConfig?.task ?? "pose"}
                 onChange={(e) => {
                   modelConfigRef.current.task = e.target.value;
                   loadModel();
@@ -80,53 +81,6 @@ const SettingsPanel = memo(function SettingsPanel({
                 <option value="detect">Object Detection</option>
                 <option value="pose">Pose Estimation</option>
                 <option value="seg">Segmentation</option>
-              </select>
-            </div>
-
-            <div className="flex flex-col">
-              <label className={labelClass}>Model</label>
-              <select
-                defaultValue={modelConfigRef.current.model}
-                onChange={(e) => {
-                  const selectedModel = e.target.value;
-                  modelConfigRef.current.model = selectedModel;
-
-                  if (
-                    // yolo11 and yolo12 require NMS, lock it on
-                    selectedModel.startsWith("yolo11") ||
-                    selectedModel.startsWith("yolo12")
-                  ) {
-                    setNmsEnabled(true);
-                    setNmsLocked(true);
-                    modelConfigRef.current.enableNMS = true;
-                  } else if (selectedModel.startsWith("yolo26")) {
-                    // yolo26 has built-in NMS, lock it on
-                    setNmsEnabled(false);
-                    setNmsLocked(true);
-                    modelConfigRef.current.enableNMS = false;
-                  } else {
-                    // Custom models, allow user to toggle NMS
-                    setNmsEnabled(true);
-                    setNmsLocked(false);
-                    modelConfigRef.current.enableNMS = true;
-                  }
-
-                  loadModel();
-                }}
-                disabled={activeFeature !== null}
-                className={inputClass}
-              >
-                <option value="yolo11n">YOLO11n (2.6M)</option>
-                <option value="yolo11s">YOLO11s (9.4M)</option>
-                <option value="yolo12n">YOLO12n (2.6M)</option>
-                <option value="yolo12s">YOLO12s (9.3M)</option>
-                <option value="yolo26n">YOLO26n (2.4M)</option>
-                <option value="yolo26s">YOLO26s (9.5M)</option>
-                {customModels.map((model, index) => (
-                  <option key={index} value={model.url}>
-                    {model.name}
-                  </option>
-                ))}
               </select>
             </div>
 
@@ -156,39 +110,11 @@ const SettingsPanel = memo(function SettingsPanel({
             </div>
 
             <div className="flex flex-col sm:col-span-2">
-              <label className="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg border border-gray-600/50 hover:bg-gray-700/50 cursor-pointer transition-colors group">
-                <div className="flex flex-col">
-                  <span className="text-gray-200 font-medium text-sm group-hover:text-white transition-colors">
-                    Non-Maximum Suppression (NMS)
-                  </span>
-                  <span className="text-gray-400 text-xs">
-                    {nmsLocked
-                      ? nmsEnabled
-                        ? "Required & Locked for this model"
-                        : "Disabled & Locked for YOLO26"
-                      : "Optional for Custom Models"}
-                  </span>
-                </div>
-                <div className="relative flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={nmsEnabled}
-                    onChange={(e) => {
-                      const isChecked = e.target.checked;
-                      setNmsEnabled(isChecked);
-                      modelConfigRef.current.enableNMS = isChecked;
-                    }}
-                    disabled={activeFeature !== null || nmsLocked}
-                    className="peer sr-only "
-                  />
-                  <div
-                    className={`w-11 h-6 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all 
-                    ${activeFeature !== null || nmsLocked ? "opacity-50 cursor-not-allowed" : ""}
-                    ${nmsEnabled ? "peer-checked:bg-violet-600 bg-violet-600" : "bg-gray-700"}
-                  `}
-                  ></div>
-                </div>
-              </label>
+              <div className="rounded-lg border border-gray-600/50 bg-gray-800/50 p-3">
+                <p className="text-gray-200 font-medium text-sm">
+                  NMS is handled by the fixed model output.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -202,7 +128,7 @@ const SettingsPanel = memo(function SettingsPanel({
             <div className="flex flex-col">
               <label className={labelClass}>Backend</label>
               <select
-                defaultValue={modelConfigRef.current.backend}
+                defaultValue={defaultModelConfig?.backend ?? "wasm"}
                 onChange={(e) => {
                   modelConfigRef.current.backend = e.target.value;
                   loadModel();
@@ -258,7 +184,7 @@ const SettingsPanel = memo(function SettingsPanel({
               <select
                 disabled={activeFeature !== null}
                 ref={imgszTypeSelectorRef}
-                defaultValue={modelConfigRef.current.imgszType}
+                defaultValue={defaultModelConfig?.imgszType ?? "dynamic"}
                 onChange={(e) => {
                   modelConfigRef.current.imgszType = e.target.value;
                 }}

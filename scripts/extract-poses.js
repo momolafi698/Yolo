@@ -37,7 +37,7 @@ const KP = Object.fromEntries(KEYPOINT_NAMES.map((name, index) => [name, index])
 const DEFAULTS = {
   input: "videos",
   output: "public/catalogue/poses",
-  model: "public/models/yolo11n-pose.onnx",
+  model: "public/models/yolo26s-pose.onnx",
   fps: 10,
   imageSize: 640,
   scoreThreshold: 0.35,
@@ -53,12 +53,12 @@ Extract YOLO pose tracks from dance videos.
 
 Usage:
   bun run extract:poses
-  bun scripts/extract-poses.js --input videos --fps 12 --model public/models/yolo11n-pose.onnx
+  bun scripts/extract-poses.js --input videos --fps 12
 
 Options:
   --input <path>       Video file or directory. Default: ${DEFAULTS.input}
   --output <dir>       Output catalogue directory. Default: ${DEFAULTS.output}
-  --model <path>       YOLO pose ONNX model. Default: ${DEFAULTS.model}
+  --model              Removed. Pose extraction always uses YOLO26-s.
   --fps <number>       Sampling FPS. Default: ${DEFAULTS.fps}
   --size <number>      Model input square size. Default: ${DEFAULTS.imageSize}
   --score <number>     Person confidence threshold. Default: ${DEFAULTS.scoreThreshold}
@@ -92,8 +92,7 @@ function parseArgs(argv) {
         break;
       case "--model":
       case "-m":
-        options.model = readValue();
-        break;
+        throw new Error("Model selection was removed; pose extraction always uses YOLO26-s.");
       case "--fps":
         options.fps = Number(readValue());
         break;
@@ -308,6 +307,17 @@ function unletterboxBox(cx, cy, boxWidth, boxHeight, letterbox, width, height) {
   ];
 }
 
+function unletterboxCorners(x1, y1, x2, y2, letterbox, width, height) {
+  const topLeft = unletterboxPoint(x1, y1, letterbox, width, height);
+  const bottomRight = unletterboxPoint(x2, y2, letterbox, width, height);
+  return [
+    topLeft.x,
+    topLeft.y,
+    Math.max(0, bottomRight.x - topLeft.x),
+    Math.max(0, bottomRight.y - topLeft.y),
+  ];
+}
+
 function postProcessPose(rawTensor, options, videoMeta, letterbox) {
   const dims = rawTensor.dims;
   if (dims.length !== 3) {
@@ -329,19 +339,35 @@ function postProcessPose(rawTensor, options, videoMeta, letterbox) {
     ? (predictionIndex, attrIndex) => data[attrIndex * predictions + predictionIndex]
     : (predictionIndex, attrIndex) => data[predictionIndex * attrs + attrIndex];
 
+  const isEndToEndPose = attrs >= 57;
+  const keypointOffset = isEndToEndPose ? 6 : 5;
   const detections = [];
   for (let i = 0; i < predictions; i++) {
     const score = get(i, 4);
     if (score < options.scoreThreshold) continue;
 
-    const cx = get(i, 0);
-    const cy = get(i, 1);
-    const bw = get(i, 2);
-    const bh = get(i, 3);
-    const bbox = unletterboxBox(cx, cy, bw, bh, letterbox, videoMeta.width, videoMeta.height);
+    const bbox = isEndToEndPose
+      ? unletterboxCorners(
+        get(i, 0),
+        get(i, 1),
+        get(i, 2),
+        get(i, 3),
+        letterbox,
+        videoMeta.width,
+        videoMeta.height,
+      )
+      : unletterboxBox(
+        get(i, 0),
+        get(i, 1),
+        get(i, 2),
+        get(i, 3),
+        letterbox,
+        videoMeta.width,
+        videoMeta.height,
+      );
 
     const keypoints = KEYPOINT_NAMES.map((name, kpIndex) => {
-      const attr = 5 + kpIndex * 3;
+      const attr = keypointOffset + kpIndex * 3;
       const point = unletterboxPoint(
         get(i, attr),
         get(i, attr + 1),

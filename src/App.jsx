@@ -14,6 +14,7 @@ import { useWebcam } from "./hooks/useWebcam";
 
 import ImageDisplay from "./components/ImageDisplay";
 import ModelStatus from "./components/ModelStatus";
+import PoseOverlayTool from "./components/PoseOverlayTool";
 import SettingsPanel from "./components/SettingsPanel";
 
 const DEFAULT_MODEL_CONFIG = {
@@ -23,8 +24,8 @@ const DEFAULT_MODEL_CONFIG = {
   scoreThreshold: 0.45,
   backend: "wasm",
   numThreads: 1,
-  enableNMS: true,
-  model: "yolo11n",
+  enableNMS: false,
+  model: "yolo26n",
   modelPath: "",
   task: "pose",
   imgszType: "dynamic",
@@ -58,9 +59,10 @@ function App() {
     state: "loading",
     message: "Chargement du catalogue local...",
   });
-  const [customModels] = useState([]);
   const [customClasses] = useState([]);
   const [imgSrc] = useState(null);
+  const [videoSrc, setVideoSrc] = useState("");
+  const [videoName, setVideoName] = useState("");
   const [activeFeature, setActiveFeature] = useState(null);
   const [gameState, setGameState] = useState("idle");
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
@@ -86,12 +88,15 @@ function App() {
   const modelConfigRef = useRef(DEFAULT_MODEL_CONFIG);
   const cameraSelectorRef = useRef(null);
   const imgszTypeSelectorRef = useRef(null);
+  const fileVideoRef = useRef(null);
   const imgRef = useRef(null);
   const overlayRef = useRef(null);
   const cameraRef = useRef(null);
+  const videoRef = useRef(null);
   const activeFeatureRef = useRef(activeFeature);
   const gameStateRef = useRef(gameState);
   const isProcessingRef = useRef(false);
+  const mediaLoopTokenRef = useRef(0);
   const matchHistoryRef = useRef([]);
   const liveSequenceRef = useRef([]);
   const sequenceStartRef = useRef(0);
@@ -106,6 +111,10 @@ function App() {
   useEffect(() => {
     gameStateRef.current = gameState;
   }, [gameState]);
+
+  useEffect(() => () => {
+    if (videoSrc) URL.revokeObjectURL(videoSrc);
+  }, [videoSrc]);
 
   useEffect(() => {
     if (gameState !== "countdown") return undefined;
@@ -172,15 +181,20 @@ function App() {
     setCoachComments((previous) => [message, ...previous].slice(0, 5));
   }, []);
 
-  const prepareCountdown = useCallback(() => {
+  const resetLiveComparison = useCallback(() => {
     matchHistoryRef.current = [];
     liveSequenceRef.current = [];
-    sequenceStartRef.current = 0;
+    sequenceStartRef.current = performance.now();
     setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
     setStableMatch(null);
-    setDanceScore(0);
     setDancePrecision(0);
     setSequenceSampleCount(0);
+  }, []);
+
+  const prepareCountdown = useCallback(() => {
+    resetLiveComparison();
+    sequenceStartRef.current = 0;
+    setDanceScore(0);
     setCountdown(COUNTDOWN_SECONDS);
     setGameState("countdown");
     setPerformanceRating({
@@ -190,7 +204,7 @@ function App() {
     setCoachComments([
       "Prepare-toi. Detection temporelle dans 5 secondes.",
     ]);
-  }, []);
+  }, [resetLiveComparison]);
 
   const handleInferenceResult = useCallback(
     (data) => {
@@ -234,7 +248,9 @@ function App() {
             color: "text-cyan-300 font-black",
           });
         } else if (targetPose?.keypoints && catalogue && state === "detecting") {
-          const elapsedSeconds = (now - sequenceStartRef.current) / 1000;
+          const elapsedSeconds = activeFeatureRef.current === "video"
+            ? (videoRef.current?.currentTime ?? 0)
+            : (now - sequenceStartRef.current) / 1000;
           const sample = createPoseSample(targetPose, elapsedSeconds);
 
           if (sample) {
@@ -381,55 +397,170 @@ function App() {
     });
   }, [loadModel]);
 
-  const startCameraLoop = useCallback(() => {
-    const loop = async () => {
-      if (activeFeatureRef.current !== "camera") return;
+  const processMediaFrame = useCallback(async (mediaElement) => {
+    if (
+      isProcessingRef.current ||
+      !mediaElement ||
+      mediaElement.readyState < 2 ||
+      !mediaElement.videoWidth ||
+      !mediaElement.videoHeight ||
+      !overlayRef.current
+    ) {
+      return;
+    }
+
+    isProcessingRef.current = true;
+
+    try {
+      const bitmap = await createImageBitmap(mediaElement);
 
       if (
-        !isProcessingRef.current &&
-        cameraRef.current &&
-        cameraRef.current.readyState >= 2
+        overlayRef.current.width !== mediaElement.videoWidth ||
+        overlayRef.current.height !== mediaElement.videoHeight
       ) {
-        isProcessingRef.current = true;
-
-        try {
-          const bitmap = await createImageBitmap(cameraRef.current);
-
-          if (
-            overlayRef.current.width !== cameraRef.current.videoWidth ||
-            overlayRef.current.height !== cameraRef.current.videoHeight
-          ) {
-            overlayRef.current.width = cameraRef.current.videoWidth;
-            overlayRef.current.height = cameraRef.current.videoHeight;
-          }
-
-          DEFAULT_MODEL_CONFIG.overlaySize = [
-            overlayRef.current.width,
-            overlayRef.current.height,
-          ];
-
-          postInferenceMessage(
-            {
-              type: "INFERENCE",
-              config: DEFAULT_MODEL_CONFIG,
-              bitmap,
-            },
-            [bitmap],
-          );
-        } catch (error) {
-          console.error("Frame capture error:", error);
-          isProcessingRef.current = false;
-        }
+        overlayRef.current.width = mediaElement.videoWidth;
+        overlayRef.current.height = mediaElement.videoHeight;
       }
 
+      DEFAULT_MODEL_CONFIG.overlaySize = [
+        overlayRef.current.width,
+        overlayRef.current.height,
+      ];
+
+      postInferenceMessage(
+        {
+          type: "INFERENCE",
+          config: DEFAULT_MODEL_CONFIG,
+          bitmap,
+        },
+        [bitmap],
+      );
+    } catch (error) {
+      console.error("Frame capture error:", error);
+      isProcessingRef.current = false;
+    }
+  }, [postInferenceMessage]);
+
+  const stopMediaLoop = useCallback(() => {
+    mediaLoopTokenRef.current += 1;
+  }, []);
+
+  const startMediaLoop = useCallback((featureName, mediaRef) => {
+    mediaLoopTokenRef.current += 1;
+    const loopToken = mediaLoopTokenRef.current;
+
+    const loop = async () => {
+      if (
+        mediaLoopTokenRef.current !== loopToken ||
+        activeFeatureRef.current !== featureName
+      ) {
+        return;
+      }
+
+      const mediaElement = mediaRef.current;
+      if (!mediaElement) return;
+
+      if (featureName === "video" && (mediaElement.paused || mediaElement.ended)) {
+        return;
+      }
+
+      await processMediaFrame(mediaElement);
       requestAnimationFrame(loop);
     };
 
-    loop();
-  }, [postInferenceMessage]);
+    requestAnimationFrame(loop);
+  }, [processMediaFrame]);
+
+  const startCameraLoop = useCallback(() => {
+    startMediaLoop("camera", cameraRef);
+  }, [startMediaLoop]);
+
+  const startVideoLoop = useCallback(() => {
+    startMediaLoop("video", videoRef);
+  }, [startMediaLoop]);
+
+  const handleVideoFile = useCallback((file) => {
+    if (!file) return;
+
+    if (activeFeatureRef.current === "camera") {
+      closeCamera();
+    }
+
+    stopMediaLoop();
+    resetLiveComparison();
+    setDanceScore(0);
+    setCountdown(0);
+    setVideoName(file.name);
+    setVideoSrc(URL.createObjectURL(file));
+    setActiveFeature("video");
+    setGameState("detecting");
+    setPerformanceRating({
+      text: "VIDEO",
+      color: "text-cyan-300 font-black",
+    });
+    setCoachComments([
+      `Video chargee: ${file.name}. Lance la lecture pour voir la detection realtime.`,
+    ]);
+  }, [closeCamera, resetLiveComparison, stopMediaLoop]);
+
+  const stopVideo = useCallback(() => {
+    stopMediaLoop();
+    videoRef.current?.pause();
+    setVideoSrc("");
+    setVideoName("");
+    if (overlayRef.current) {
+      overlayRef.current.getContext("2d")?.clearRect(
+        0,
+        0,
+        overlayRef.current.width,
+        overlayRef.current.height,
+      );
+      overlayRef.current.width = 0;
+      overlayRef.current.height = 0;
+    }
+    if (activeFeatureRef.current === "video") {
+      setActiveFeature(null);
+    }
+    setGameState("idle");
+    resetLiveComparison();
+    setPerformanceRating({ text: "PRET", color: "text-slate-400" });
+    setCoachComments(["Video fermee. Tu peux relancer la camera ou ouvrir une autre video."]);
+  }, [resetLiveComparison, stopMediaLoop]);
+
+  const handleVideoLoad = useCallback(() => {
+    processMediaFrame(videoRef.current);
+  }, [processMediaFrame]);
+
+  const handleVideoPlay = useCallback(() => {
+    if (activeFeatureRef.current !== "video") return;
+    setGameState("detecting");
+    setPerformanceRating({
+      text: "DETECTE",
+      color: "text-cyan-300 font-black",
+    });
+    startVideoLoop();
+  }, [startVideoLoop]);
+
+  const handleVideoPause = useCallback(() => {
+    processMediaFrame(videoRef.current);
+  }, [processMediaFrame]);
+
+  const handleVideoSeeked = useCallback(() => {
+    resetLiveComparison();
+    processMediaFrame(videoRef.current);
+  }, [processMediaFrame, resetLiveComparison]);
+
+  const handleVideoEnded = useCallback(() => {
+    stopMediaLoop();
+    setPerformanceRating({
+      text: "FIN",
+      color: "text-slate-400 font-black",
+    });
+  }, [stopMediaLoop]);
 
   const toggleCamera = useCallback(async () => {
     if (activeFeature === "camera") {
+      stopMediaLoop();
       closeCamera();
       if (overlayRef.current) {
         overlayRef.current.width = 0;
@@ -442,6 +573,10 @@ function App() {
       liveSequenceRef.current = [];
       setPerformanceRating({ text: "PRET", color: "text-slate-400" });
       return;
+    }
+
+    if (activeFeature === "video") {
+      stopVideo();
     }
 
     const camerasList = await getCameras();
@@ -465,7 +600,7 @@ function App() {
       setPerformanceRating({ text: "ATTENTE", color: "text-amber-500 font-bold animate-pulse" });
       setCoachComments(["Caméra activée. Présentez-vous devant l'écran pour lancer la détection."]);
     }
-  }, [activeFeature, closeCamera, getCameras, openCamera, prepareCountdown]);
+  }, [activeFeature, closeCamera, getCameras, openCamera, stopMediaLoop, stopVideo]);
 
   const handleCameraLoad = useCallback(() => {
     startCameraLoop();
@@ -491,10 +626,17 @@ function App() {
         <section className="relative">
           <ImageDisplay
             cameraRef={cameraRef}
+            videoRef={videoRef}
             imgRef={imgRef}
             overlayRef={overlayRef}
             imgSrc={imgSrc}
+            videoSrc={videoSrc}
             onCameraLoad={handleCameraLoad}
+            onVideoLoad={handleVideoLoad}
+            onVideoPlay={handleVideoPlay}
+            onVideoPause={handleVideoPause}
+            onVideoSeeked={handleVideoSeeked}
+            onVideoEnded={handleVideoEnded}
             onImageLoad={imageLoad}
             activeFeature={activeFeature}
           />
@@ -533,7 +675,9 @@ function App() {
                   ></span>
                   IA : {activeFeature === "loading"
                     ? "Initialisation"
-                    : gameState === "waiting_for_person"
+                    : activeFeature === "video"
+                      ? "Detection realtime sur video locale"
+                      : gameState === "waiting_for_person"
                       ? "En attente d'un joueur..."
                       : gameState === "countdown"
                         ? "Compte a rebours"
@@ -659,11 +803,23 @@ function App() {
         </aside>
       </main>
 
+      <PoseOverlayTool catalogue={catalogue} />
+
       <section className="captor-grid">
         <div className="card-violet flex flex-col gap-3">
           <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
             Commandes
           </h2>
+          <input
+            ref={fileVideoRef}
+            type="file"
+            accept="video/*"
+            hidden
+            onChange={(event) => {
+              handleVideoFile(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
           <div className="flex flex-wrap gap-3">
             <button
               onClick={toggleCamera}
@@ -677,13 +833,42 @@ function App() {
               {activeFeature === "camera" ? "Arreter la camera" : "Activer la camera"}
             </button>
             <button
-              onClick={prepareCountdown}
-              className="px-5 py-2.5 rounded-lg bg-[#050818] hover:bg-violet-950 text-violet-200 border border-violet-500/30 font-bold transition-all cursor-pointer"
-              disabled={activeFeature !== "camera"}
+              onClick={() => {
+                if (activeFeature === "video") {
+                  stopVideo();
+                } else {
+                  fileVideoRef.current?.click();
+                }
+              }}
+              className={`px-5 py-2.5 rounded-lg font-bold shadow-md transition-all cursor-pointer ${
+                activeFeature === "video"
+                  ? "bg-red-600 hover:bg-red-500 text-white"
+                  : "bg-cyan-600 hover:bg-cyan-500 text-white"
+              }`}
+              disabled={activeFeature === "loading" || activeFeature === "camera"}
             >
-              Relancer 5s
+              {activeFeature === "video" ? "Fermer la video" : "Tester une video"}
+            </button>
+            <button
+              onClick={() => {
+                if (activeFeature === "video") {
+                  resetLiveComparison();
+                  processMediaFrame(videoRef.current);
+                } else {
+                  prepareCountdown();
+                }
+              }}
+              className="px-5 py-2.5 rounded-lg bg-[#050818] hover:bg-violet-950 text-violet-200 border border-violet-500/30 font-bold transition-all cursor-pointer"
+              disabled={activeFeature !== "camera" && activeFeature !== "video"}
+            >
+              {activeFeature === "video" ? "Reset analyse" : "Relancer 5s"}
             </button>
           </div>
+          {activeFeature === "video" && (
+            <p className="text-xs text-slate-400 truncate">
+              Source video : {videoName || "video locale"}
+            </p>
+          )}
         </div>
 
         <div className="card-violet flex flex-col gap-3 xl:col-span-2">
@@ -717,9 +902,9 @@ function App() {
               cameraSelectorRef={cameraSelectorRef}
               imgszTypeSelectorRef={imgszTypeSelectorRef}
               modelConfigRef={modelConfigRef}
+              defaultModelConfig={DEFAULT_MODEL_CONFIG}
               customClasses={customClasses}
               cameras={cameras}
-              customModels={customModels}
               activeFeature={activeFeature}
               defaultClasses={classes}
               loadModel={loadModel}

@@ -30,7 +30,7 @@ const DEFAULT_OPTIONS = {
   minComparableKeypoints: 8,
   minConfidence: 52,
   minSequenceSamples: 8,
-  sequenceWindowSeconds: 4,
+  sequenceWindowSeconds: 3,
   maxTimeGapSeconds: 0.22,
   speedFactors: [0.85, 1, 1.15],
 };

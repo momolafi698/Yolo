@@ -100,31 +100,6 @@ function App() {
     activeFeatureRef.current = activeFeature;
   }, [activeFeature]);
 
-  // Gestion du chronomètre de détection de l'IA
-  useEffect(() => {
-    if (gameState !== "detecting") return;
-
-    const interval = setInterval(() => {
-      setDetectionTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setGameState("ia_lost");
-          closeCamera(); // Éteindre la caméra à la défaite
-          if (overlayRef.current) {
-            overlayRef.current.width = 0;
-            overlayRef.current.height = 0;
-          }
-          setActiveFeature(null);
-          setDetails([]);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [gameState, closeCamera]);
-
   // --- Callbacks for Workers ---
 
   const handleInferenceResult = useCallback((data) => {
@@ -300,6 +275,31 @@ function App() {
       }));
     }
   }, [cameraStatus]);
+
+  // Gestion du chronomètre de détection de l'IA
+  useEffect(() => {
+    if (gameState !== "detecting") return;
+
+    const interval = setInterval(() => {
+      setDetectionTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          setGameState("ia_lost");
+          closeCamera(); // Éteindre la caméra à la défaite
+          if (overlayRef.current) {
+            overlayRef.current.width = 0;
+            overlayRef.current.height = 0;
+          }
+          setActiveFeature(null);
+          setDetails([]);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [gameState, closeCamera]);
 
   const { processVideo } = useVideoProcessWorker({
     onStatusUpdate: handleVideoStatusKey,

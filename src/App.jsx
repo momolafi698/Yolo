@@ -182,9 +182,21 @@ function App() {
         inferenceTime: data.inferenceTime,
       }));
 
-      const firstPose = data.results?.[0];
+      const targetPose = data.results && data.results.length > 0
+        ? data.results.reduce((best, current) => {
+            const bestScore = best.score !== undefined ? best.score : (best.confidence || 0);
+            const currentScore = current.score !== undefined ? current.score : (current.confidence || 0);
+            return currentScore > bestScore ? current : best;
+          }, data.results[0])
+        : null;
       const now = performance.now();
       const state = gameStateRef.current;
+
+      if (state === "waiting_for_person" && targetPose?.keypoints) {
+        // Un joueur est détecté ! On déclenche automatiquement le compte à rebours
+        prepareCountdown();
+        return;
+      }
 
       if (state === "countdown") {
         setDancePrecision(0);
@@ -193,9 +205,9 @@ function App() {
           text: `${countdown}`,
           color: "text-cyan-300 font-black",
         });
-      } else if (firstPose?.keypoints && catalogue && state === "detecting") {
+      } else if (targetPose?.keypoints && catalogue && state === "detecting") {
         const elapsedSeconds = (now - sequenceStartRef.current) / 1000;
-        const sample = createPoseSample(firstPose, elapsedSeconds);
+        const sample = createPoseSample(targetPose, elapsedSeconds);
 
         if (sample) {
           liveSequenceRef.current = liveSequenceRef.current
@@ -254,7 +266,7 @@ function App() {
           });
         }
       } else {
-        if (state !== "detecting") {
+        if (state !== "detecting" && state !== "waiting_for_person" && state !== "countdown") {
           setDancePrecision(0);
           setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
           setStableMatch(null);
@@ -265,6 +277,11 @@ function App() {
           setPerformanceRating({
             text: "EN ATTENTE",
             color: "text-slate-500",
+          });
+        } else if (state === "waiting_for_person") {
+          setPerformanceRating({
+            text: "ATTENTE",
+            color: "text-amber-500 font-bold animate-pulse",
           });
         }
       }
@@ -435,7 +452,9 @@ function App() {
 
     if (success) {
       setActiveFeature("camera");
-      prepareCountdown();
+      setGameState("waiting_for_person");
+      setPerformanceRating({ text: "ATTENTE", color: "text-amber-500 font-bold animate-pulse" });
+      setCoachComments(["Caméra activée. Présentez-vous devant l'écran pour lancer la détection."]);
     }
   }, [activeFeature, closeCamera, getCameras, openCamera, prepareCountdown]);
 
@@ -487,7 +506,9 @@ function App() {
                       ? "bg-gradient-to-r from-violet-500 via-fuchsia-500 to-violet-500 animate-pulse w-full"
                       : gameState === "detecting"
                         ? "bg-gradient-to-r from-violet-600 via-fuchsia-500 to-violet-600 animate-scanner-slow w-full"
-                        : "bg-slate-700/50 w-full"
+                        : gameState === "waiting_for_person"
+                          ? "bg-amber-600/30 w-full animate-pulse"
+                          : "bg-slate-700/50 w-full"
                   }`}
                   style={{ backgroundSize: "200% 100%" }}
                 ></div>
@@ -496,16 +517,18 @@ function App() {
                 <span className="flex items-center gap-1.5">
                   <span
                     className={`w-2 h-2 rounded-full ${
-                      activeFeature === "loading" || gameState === "detecting"
+                      activeFeature === "loading" || gameState === "detecting" || gameState === "waiting_for_person"
                         ? "bg-fuchsia-500 animate-ping"
                         : "bg-slate-600"
                     }`}
                   ></span>
                   IA : {activeFeature === "loading"
                     ? "Initialisation"
-                    : gameState === "countdown"
-                      ? "Compte a rebours"
-                      : "Comparaison temporelle locale"}
+                    : gameState === "waiting_for_person"
+                      ? "En attente d'un joueur..."
+                      : gameState === "countdown"
+                        ? "Compte a rebours"
+                        : "Comparaison temporelle locale"}
                 </span>
                 {(gameState === "detecting" || gameState === "countdown") && (
                   <span className="text-cyan-400">Precision : {Math.round(dancePrecision)}%</span>
@@ -523,11 +546,13 @@ function App() {
                   Detection temporelle
                 </p>
                 <h2 className="text-2xl font-black text-white mt-1">
-                  {gameState === "countdown"
-                    ? `Depart dans ${countdown}`
-                    : shownMatch
-                      ? shownMatch.title
-                      : "Aucune danse"}
+                  {gameState === "waiting_for_person"
+                    ? "Présentez-vous devant l'IA"
+                    : gameState === "countdown"
+                      ? `Depart dans ${countdown}`
+                      : shownMatch
+                        ? shownMatch.title
+                        : "Aucune danse"}
                 </h2>
               </div>
               <span className={`text-xl font-black ${performanceRating.color}`}>

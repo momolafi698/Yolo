@@ -169,6 +169,171 @@ export const DANCE_POSES = {
         rightElbow: "Plie bien le coude droit !"
       }
     }
+  ],
+  // Poses pour YMCA (Village People)
+  "CsrffgdM450": [
+    {
+      name: "Lettre Y (Bras en V)",
+      angles: {
+        rightElbow: 170,
+        leftElbow: 170,
+        rightShoulder: 135,
+        leftShoulder: 135
+      },
+      check: (kps) => {
+        const sw = getShoulderWidth(kps);
+        return kps[KP.rightWrist].y < kps[KP.rightShoulder].y &&
+               kps[KP.leftWrist].y < kps[KP.leftShoulder].y &&
+               distance(kps[KP.rightWrist], kps[KP.leftWrist]) > sw * 1.5;
+      },
+      tips: {
+        rightShoulder: "Lève tes bras en l'air à 45 degrés pour former le Y !",
+        leftShoulder: "Lève tes bras en l'air à 45 degrés pour former le Y !"
+      }
+    }
+  ],
+  // Poses pour Gangnam Style (Psy)
+  "9bZkp7q19f0": [
+    {
+      name: "Cavalier (Poignets croisés bas)",
+      angles: {
+        rightElbow: 90,
+        leftElbow: 90,
+        rightShoulder: 45,
+        leftShoulder: 45
+      },
+      check: (kps) => {
+        const sw = getShoulderWidth(kps);
+        return distance(kps[KP.rightWrist], kps[KP.leftWrist]) < sw * 0.4 &&
+               kps[KP.rightWrist].y > kps[KP.rightShoulder].y;
+      },
+      tips: {
+        rightElbow: "Plie tes bras et croise tes poignets vers le bas !",
+        leftElbow: "Plie tes bras et croise tes poignets vers le bas !"
+      }
+    }
+  ],
+  // Poses pour Thriller (Michael Jackson)
+  "sOnqjkJTMaA": [
+    {
+      name: "Zombie (Bras levés pliés)",
+      angles: {
+        rightElbow: 100,
+        leftElbow: 100,
+        rightShoulder: 80,
+        leftShoulder: 80
+      },
+      check: (kps) => {
+        return kps[KP.rightWrist].y < kps[KP.rightElbow].y &&
+               kps[KP.leftWrist].y < kps[KP.leftElbow].y;
+      },
+      tips: {
+        rightShoulder: "Lève tes bras devant toi comme un zombie !",
+        rightElbow: "Plie un peu les coudes et laisse pendre tes mains !"
+      }
+    }
+  ],
+  // Poses pour Single Ladies (Beyoncé)
+  "4m1EFMoRFvY": [
+    {
+      name: "Main gauche sur la tête",
+      angles: {
+        leftElbow: 30,
+        leftShoulder: 120,
+        rightElbow: 45,
+        rightShoulder: 40
+      },
+      check: (kps) => {
+        const sw = getShoulderWidth(kps);
+        return distance(kps[KP.leftWrist], kps[KP.leftEar]) < sw * 0.8;
+      },
+      tips: {
+        leftShoulder: "Lève la main gauche près de ta tempe !",
+        rightElbow: "Pose ta main droite sur ta hanche !"
+      }
+    }
+  ],
+  // Poses pour Waka Waka (Shakira)
+  "pRpeEdMmmQ0": [
+    {
+      name: "Mains jointes (Prière)",
+      angles: {
+        rightElbow: 60,
+        leftElbow: 60,
+        rightShoulder: 70,
+        leftShoulder: 70
+      },
+      check: (kps) => {
+        const sw = getShoulderWidth(kps);
+        return distance(kps[KP.rightWrist], kps[KP.leftWrist]) < sw * 0.3 &&
+               kps[KP.rightWrist].y < kps[KP.rightHip].y &&
+               kps[KP.rightWrist].y > kps[KP.rightShoulder].y;
+      },
+      tips: {
+        rightElbow: "Joins tes deux mains devant ta poitrine !",
+        leftElbow: "Joins tes deux mains devant ta poitrine !"
+      }
+    }
+  ],
+  // Poses pour Disco Fever (John Travolta)
+  "fNFzfwLM72c": [
+    {
+      name: "Pointé Disco",
+      angles: {
+        rightElbow: 170,
+        rightShoulder: 135,
+        leftElbow: 170,
+        leftShoulder: 25
+      },
+      check: (kps) => {
+        return kps[KP.rightWrist].y < kps[KP.rightShoulder].y &&
+               kps[KP.leftWrist].y > kps[KP.leftHip].y;
+      },
+      tips: {
+        rightShoulder: "Tends ton bras droit en diagonale vers le ciel !",
+        leftShoulder: "Pointe ton bras gauche vers le bas !"
+      }
+    }
+  ],
+  // Poses pour Asereje (The Ketchup Song)
+  "V0PisGe66mY": [
+    {
+      name: "Mains croisées devant le front",
+      angles: {
+        rightElbow: 45,
+        leftElbow: 45,
+        rightShoulder: 110,
+        leftShoulder: 110
+      },
+      check: (kps) => {
+        const sw = getShoulderWidth(kps);
+        return distance(kps[KP.rightWrist], kps[KP.nose]) < sw * 0.8 &&
+               distance(kps[KP.leftWrist], kps[KP.nose]) < sw * 0.8;
+      },
+      tips: {
+        rightShoulder: "Lève tes mains au niveau de ton visage !",
+        rightElbow: "Croise tes mains près du front !"
+      }
+    }
+  ],
+  // Poses pour Never Gonna Give You Up (Rick Astley)
+  "dQw4w9WgXcQ": [
+    {
+      name: "Bras droit levé",
+      angles: {
+        rightElbow: 160,
+        rightShoulder: 150,
+        leftElbow: 45,
+        leftShoulder: 30
+      },
+      check: (kps) => {
+        return kps[KP.rightWrist].y < kps[KP.rightShoulder].y && kps[KP.leftWrist].y > kps[KP.leftHip].y;
+      },
+      tips: {
+        rightShoulder: "Lève ton bras droit bien haut !",
+        leftElbow: "Plie le bras gauche près de la hanche."
+      }
+    }
   ]
 };
 
@@ -312,7 +477,49 @@ export function detectDanceStyle(kps) {
     return "Macarena";
   }
 
-  // 3. Détection de Rickroll / Never Gonna Give You Up (Bras droit levé, coude gauche plié)
+  // 3. Détection de YMCA (Bras en V levés)
+  if (kps[KP.rightWrist].y < kps[KP.rightShoulder].y && kps[KP.leftWrist].y < kps[KP.leftShoulder].y &&
+      rightShoulder > 110 && leftShoulder > 110 && distance(kps[KP.rightWrist], kps[KP.leftWrist]) > sw * 1.3) {
+    return "YMCA";
+  }
+
+  // 4. Détection de Gangnam Style (Poignets croisés bas)
+  if (distance(kps[KP.rightWrist], kps[KP.leftWrist]) < sw * 0.5 &&
+      kps[KP.rightWrist].y > kps[KP.rightShoulder].y &&
+      rightElbow < 110 && leftElbow < 110 && rightShoulder < 60 && leftShoulder < 60) {
+    return "Gangnam Style";
+  }
+
+  // 5. Détection de Thriller (Pose Zombie)
+  if (kps[KP.rightWrist].y < kps[KP.rightElbow].y && kps[KP.leftWrist].y < kps[KP.leftElbow].y &&
+      rightShoulder > 60 && leftShoulder > 60 && rightElbow < 120 && leftElbow < 120) {
+    return "Thriller";
+  }
+
+  // 6. Détection de Single Ladies (Main gauche à l'oreille, main droite sur la hanche)
+  if (distance(kps[KP.leftWrist], kps[KP.leftEar]) < sw * 0.9 &&
+      distance(kps[KP.rightWrist], kps[KP.rightHip]) < sw * 1.0) {
+    return "Single Ladies";
+  }
+
+  // 7. Détection de Waka Waka (Mains jointes poitrine)
+  if (distance(kps[KP.rightWrist], kps[KP.leftWrist]) < sw * 0.4 &&
+      kps[KP.rightWrist].y > kps[KP.rightShoulder].y && kps[KP.rightWrist].y < kps[KP.rightHip].y) {
+    return "Waka Waka";
+  }
+
+  // 8. Détection de Disco Fever (John Travolta)
+  if (kps[KP.rightWrist].y < kps[KP.rightShoulder].y && kps[KP.leftWrist].y > kps[KP.leftHip].y &&
+      rightShoulder > 110 && leftShoulder < 45) {
+    return "Disco Fever";
+  }
+
+  // 9. Détection de Asereje (Mains près du front)
+  if (distance(kps[KP.rightWrist], kps[KP.nose]) < sw * 0.9 && distance(kps[KP.leftWrist], kps[KP.nose]) < sw * 0.9) {
+    return "Asereje";
+  }
+
+  // 10. Détection de Rickroll / Never Gonna Give You Up (Bras droit levé, coude gauche plié)
   if (kps[KP.rightWrist].y < kps[KP.rightShoulder].y && rightShoulder > 120 && leftElbow < 75 && kps[KP.leftWrist].y > kps[KP.leftHip].y) {
     return "Never Gonna Give You Up";
   }
@@ -371,12 +578,26 @@ export async function searchDanceVideoOnWeb(danceName, platform = "youtube") {
     "youtube": {
       "Rasputin": { videoId: "gCzgc_RelBA", title: "Rasputin - Boney M (Just Dance)" },
       "Macarena": { videoId: "H_wZz_p20mU", title: "Macarena - Los Del Rio (Just Dance)" },
-      "Never Gonna Give You Up": { videoId: "dQw4w9WgXcQ", title: "Rick Astley - Never Gonna Give You Up" }
+      "Never Gonna Give You Up": { videoId: "dQw4w9WgXcQ", title: "Rick Astley - Never Gonna Give You Up" },
+      "YMCA": { videoId: "CsrffgdM450", title: "YMCA - Village People (Just Dance)" },
+      "Gangnam Style": { videoId: "9bZkp7q19f0", title: "PSY - GANGNAM STYLE (Just Dance)" },
+      "Thriller": { videoId: "sOnqjkJTMaA", title: "Michael Jackson - Thriller (Just Dance)" },
+      "Single Ladies": { videoId: "4m1EFMoRFvY", title: "Beyoncé - Single Ladies (Just Dance)" },
+      "Waka Waka": { videoId: "pRpeEdMmmQ0", title: "Shakira - Waka Waka (Just Dance)" },
+      "Disco Fever": { videoId: "fNFzfwLM72c", title: "Disco Fever - Just Dance Gameplay" },
+      "Asereje": { videoId: "V0PisGe66mY", title: "Asereje (The Ketchup Song) - Just Dance" }
     },
     "tiktok": {
       "Rasputin": { videoId: "bO2tq4zXG3A", title: "Rasputin TikTok Dance Trend" },
       "Macarena": { videoId: "G0eH9n64Uts", title: "Macarena TikTok Dance Challenge" },
-      "Never Gonna Give You Up": { videoId: "gB4D914Qooc", title: "Rickroll TikTok compilation" }
+      "Never Gonna Give You Up": { videoId: "gB4D914Qooc", title: "Rickroll TikTok compilation" },
+      "YMCA": { videoId: "d6_cO05_0dM", title: "YMCA TikTok Dance Challenge" },
+      "Gangnam Style": { videoId: "p1Gf7g3216g", title: "Gangnam Style TikTok Challenge" },
+      "Thriller": { videoId: "2nB1n34927b", title: "Thriller TikTok Dance Trend" },
+      "Single Ladies": { videoId: "g8B3216b9bc", title: "Single Ladies TikTok Dance" },
+      "Waka Waka": { videoId: "pRm2b87f62c", title: "Waka Waka Shakira TikTok Trend" },
+      "Disco Fever": { videoId: "d7B0n631a0b", title: "Disco Dance TikTok Trend" },
+      "Asereje": { videoId: "fG831a89c20", title: "Asereje Ketchup Song TikTok Challenge" }
     }
   };
   

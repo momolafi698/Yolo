@@ -393,7 +393,12 @@ function calculateIou(a, b) {
 }
 
 function pickBestPerson(detections) {
-  return detections[0] ?? null;
+  if (!detections.length) return null;
+  return detections.reduce((best, current) => {
+    const bestArea = best.bbox[2] * best.bbox[3];
+    const currentArea = current.bbox[2] * current.bbox[3];
+    return currentArea > bestArea ? current : best;
+  });
 }
 
 function distance(a, b) {

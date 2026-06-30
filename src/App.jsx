@@ -34,6 +34,18 @@ const DEFAULT_MODEL_CONFIG = {
 const COUNTDOWN_SECONDS = 5;
 const SEQUENCE_WINDOW_SECONDS = 4;
 
+function getHighestScorePose(results) {
+  if (!Array.isArray(results) || results.length === 0) {
+    return null;
+  }
+
+  return results.reduce((best, current) => {
+    const bestScore = best?.score ?? best?.confidence ?? 0;
+    const currentScore = current?.score ?? current?.confidence ?? 0;
+    return currentScore > bestScore ? current : best;
+  }, results[0]);
+}
+
 function App() {
   const [processingStatus, setProcessingStatus] = useState({
     warnUpTime: 0,
@@ -160,6 +172,26 @@ function App() {
     setCoachComments((previous) => [message, ...previous].slice(0, 5));
   }, []);
 
+  const prepareCountdown = useCallback(() => {
+    matchHistoryRef.current = [];
+    liveSequenceRef.current = [];
+    sequenceStartRef.current = 0;
+    setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
+    setStableMatch(null);
+    setDanceScore(0);
+    setDancePrecision(0);
+    setSequenceSampleCount(0);
+    setCountdown(COUNTDOWN_SECONDS);
+    setGameState("countdown");
+    setPerformanceRating({
+      text: `${COUNTDOWN_SECONDS}`,
+      color: "text-cyan-300 font-black",
+    });
+    setCoachComments([
+      "Prepare-toi. Detection temporelle dans 5 secondes.",
+    ]);
+  }, []);
+
   const handleInferenceResult = useCallback(
     (data) => {
       const overlayCtx = overlayRef.current?.getContext("2d");
@@ -168,127 +200,124 @@ function App() {
         return;
       }
 
-      overlayCtx.clearRect(0, 0, overlayCtx.canvas.width, overlayCtx.canvas.height);
-      renderOverlay(
-        data.results,
-        data.maskImageData,
-        overlayCtx,
-        DEFAULT_MODEL_CONFIG.task,
-        DEFAULT_MODEL_CONFIG.classes,
-      );
+      try {
+        const targetPose = getHighestScorePose(data.results);
+        const displayedResults = targetPose ? [targetPose] : [];
 
-      setProcessingStatus((previous) => ({
-        ...previous,
-        inferenceTime: data.inferenceTime,
-      }));
+        overlayCtx.clearRect(0, 0, overlayCtx.canvas.width, overlayCtx.canvas.height);
+        renderOverlay(
+          displayedResults,
+          data.maskImageData,
+          overlayCtx,
+          DEFAULT_MODEL_CONFIG.task,
+          DEFAULT_MODEL_CONFIG.classes,
+        );
 
-      const targetPose = data.results && data.results.length > 0
-        ? data.results.reduce((best, current) => {
-            const bestScore = best.score !== undefined ? best.score : (best.confidence || 0);
-            const currentScore = current.score !== undefined ? current.score : (current.confidence || 0);
-            return currentScore > bestScore ? current : best;
-          }, data.results[0])
-        : null;
-      const now = performance.now();
-      const state = gameStateRef.current;
+        setProcessingStatus((previous) => ({
+          ...previous,
+          inferenceTime: data.inferenceTime,
+        }));
 
-      if (state === "waiting_for_person" && targetPose?.keypoints) {
-        // Un joueur est détecté ! On déclenche automatiquement le compte à rebours
-        prepareCountdown();
-        return;
-      }
+        const now = performance.now();
+        const state = gameStateRef.current;
 
-      if (state === "countdown") {
-        setDancePrecision(0);
-        setSequenceSampleCount(0);
-        setPerformanceRating({
-          text: `${countdown}`,
-          color: "text-cyan-300 font-black",
-        });
-      } else if (targetPose?.keypoints && catalogue && state === "detecting") {
-        const elapsedSeconds = (now - sequenceStartRef.current) / 1000;
-        const sample = createPoseSample(targetPose, elapsedSeconds);
-
-        if (sample) {
-          liveSequenceRef.current = liveSequenceRef.current
-            .concat(sample)
-            .filter(
-              (entry) => elapsedSeconds - entry.timestamp <= SEQUENCE_WINDOW_SECONDS,
-            );
-          setSequenceSampleCount(liveSequenceRef.current.length);
+        if (state === "waiting_for_person" && targetPose?.keypoints) {
+          prepareCountdown();
+          return;
         }
 
-        const instantMatch = matchPoseSequenceToCatalogue(
-          liveSequenceRef.current,
-          catalogue,
-          {
-            sequenceWindowSeconds: SEQUENCE_WINDOW_SECONDS,
-          },
-        );
-        const stabilized = stabilizeMatches(
-          matchHistoryRef.current,
-          instantMatch,
-          now,
-          2600,
-        );
-
-        matchHistoryRef.current = stabilized.history;
-        setCurrentMatch(instantMatch);
-        setStableMatch(stabilized.stable);
-
-        const displayMatch = stabilized.stable ?? instantMatch.best;
-        const precision = displayMatch ? Math.round(displayMatch.score) : 0;
-        setDancePrecision(precision);
-
-        if (displayMatch && precision >= 70) {
+        if (state === "countdown") {
+          setDancePrecision(0);
+          setSequenceSampleCount(0);
           setPerformanceRating({
-            text: "MATCH",
-            color: "text-emerald-400 font-extrabold",
+            text: `${countdown}`,
+            color: "text-cyan-300 font-black",
           });
-          pushCoachComment(
-            `Sequence reconnue: ${displayMatch.title} (${precision}%, ${displayMatch.matchedSamples} poses).`,
+        } else if (targetPose?.keypoints && catalogue && state === "detecting") {
+          const elapsedSeconds = (now - sequenceStartRef.current) / 1000;
+          const sample = createPoseSample(targetPose, elapsedSeconds);
+
+          if (sample) {
+            liveSequenceRef.current = liveSequenceRef.current
+              .concat(sample)
+              .filter(
+                (entry) => elapsedSeconds - entry.timestamp <= SEQUENCE_WINDOW_SECONDS,
+              );
+            setSequenceSampleCount(liveSequenceRef.current.length);
+          }
+
+          const instantMatch = matchPoseSequenceToCatalogue(
+            liveSequenceRef.current,
+            catalogue,
+            {
+              sequenceWindowSeconds: SEQUENCE_WINDOW_SECONDS,
+            },
+          );
+          const stabilized = stabilizeMatches(
+            matchHistoryRef.current,
+            instantMatch,
+            now,
+            2600,
           );
 
-          if (now - lastScoreTimeRef.current > 1200) {
-            setDanceScore((previous) => previous + precision);
-            lastScoreTimeRef.current = now;
+          matchHistoryRef.current = stabilized.history;
+          setCurrentMatch(instantMatch);
+          setStableMatch(stabilized.stable);
+
+          const displayMatch = stabilized.stable ?? instantMatch.best;
+          const precision = displayMatch ? Math.round(displayMatch.score) : 0;
+          setDancePrecision(precision);
+
+          if (displayMatch && precision >= 70) {
+            setPerformanceRating({
+              text: "MATCH",
+              color: "text-emerald-400 font-extrabold",
+            });
+            pushCoachComment(
+              `Sequence reconnue: ${displayMatch.title} (${precision}%, ${displayMatch.matchedSamples} poses).`,
+            );
+
+            if (now - lastScoreTimeRef.current > 1200) {
+              setDanceScore((previous) => previous + precision);
+              lastScoreTimeRef.current = now;
+            }
+          } else if (displayMatch && precision >= 52) {
+            setPerformanceRating({
+              text: "PROBABLE",
+              color: "text-amber-300 font-bold",
+            });
+            pushCoachComment(`Le mouvement ressemble a ${displayMatch.title}, continue dans le tempo.`);
+          } else {
+            setPerformanceRating({
+              text: "CHERCHE",
+              color: "text-violet-300 font-bold animate-pulse",
+            });
           }
-        } else if (displayMatch && precision >= 52) {
-          setPerformanceRating({
-            text: "PROBABLE",
-            color: "text-amber-300 font-bold",
-          });
-          pushCoachComment(`Le mouvement ressemble a ${displayMatch.title}, continue dans le tempo.`);
         } else {
-          setPerformanceRating({
-            text: "CHERCHE",
-            color: "text-violet-300 font-bold animate-pulse",
-          });
-        }
-      } else {
-        if (state !== "detecting" && state !== "waiting_for_person" && state !== "countdown") {
-          setDancePrecision(0);
-          setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
-          setStableMatch(null);
-          matchHistoryRef.current = [];
-        }
+          if (state !== "detecting" && state !== "waiting_for_person" && state !== "countdown") {
+            setDancePrecision(0);
+            setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
+            setStableMatch(null);
+            matchHistoryRef.current = [];
+          }
 
-        if (state === "detecting") {
-          setPerformanceRating({
-            text: "EN ATTENTE",
-            color: "text-slate-500",
-          });
-        } else if (state === "waiting_for_person") {
-          setPerformanceRating({
-            text: "ATTENTE",
-            color: "text-amber-500 font-bold animate-pulse",
-          });
+          if (state === "detecting") {
+            setPerformanceRating({
+              text: "EN ATTENTE",
+              color: "text-slate-500",
+            });
+          } else if (state === "waiting_for_person") {
+            setPerformanceRating({
+              text: "ATTENTE",
+              color: "text-amber-500 font-bold animate-pulse",
+            });
+          }
         }
+      } finally {
+        isProcessingRef.current = false;
       }
-
-      isProcessingRef.current = false;
     },
-    [catalogue, countdown, pushCoachComment],
+    [catalogue, countdown, prepareCountdown, pushCoachComment],
   );
 
   const handleModelLoaded = useCallback((data) => {
@@ -398,26 +427,6 @@ function App() {
 
     loop();
   }, [postInferenceMessage]);
-
-  const prepareCountdown = useCallback(() => {
-    matchHistoryRef.current = [];
-    liveSequenceRef.current = [];
-    sequenceStartRef.current = 0;
-    setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
-    setStableMatch(null);
-    setDanceScore(0);
-    setDancePrecision(0);
-    setSequenceSampleCount(0);
-    setCountdown(COUNTDOWN_SECONDS);
-    setGameState("countdown");
-    setPerformanceRating({
-      text: `${COUNTDOWN_SECONDS}`,
-      color: "text-cyan-300 font-black",
-    });
-    setCoachComments([
-      "Prepare-toi. Detection temporelle dans 5 secondes.",
-    ]);
-  }, []);
 
   const toggleCamera = useCallback(async () => {
     if (activeFeature === "camera") {

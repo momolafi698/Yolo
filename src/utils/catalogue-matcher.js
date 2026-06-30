@@ -29,6 +29,10 @@ const DEFAULT_OPTIONS = {
   maxPointDistance: 1.15,
   minComparableKeypoints: 8,
   minConfidence: 52,
+  minSequenceSamples: 8,
+  sequenceWindowSeconds: 4,
+  maxTimeGapSeconds: 0.22,
+  speedFactors: [0.85, 1, 1.15],
 };
 
 export async function loadPoseCatalogue(baseUrl = "/") {
@@ -60,6 +64,44 @@ export function matchPoseToCatalogue(pose, catalogue, options = {}) {
 
   const candidates = catalogue.dances
     .map((dance) => findBestFrame(live, dance, config))
+    .sort((a, b) => b.score - a.score);
+
+  const best = candidates[0] ?? null;
+  const second = candidates[1] ?? null;
+  const margin = best && second ? best.score - second.score : best?.score ?? 0;
+
+  return {
+    best,
+    candidates,
+    detected: Boolean(best && best.score >= config.minConfidence),
+    margin,
+  };
+}
+
+export function createPoseSample(pose, timestamp, options = {}) {
+  const config = { ...DEFAULT_OPTIONS, ...options };
+  if (!pose?.keypoints) return null;
+
+  return {
+    timestamp,
+    keypoints: normalizeKeypoints(pose.keypoints, pose.bbox, config.keypointThreshold),
+    angles: calculateAngles(pose.keypoints, config.keypointThreshold),
+  };
+}
+
+export function matchPoseSequenceToCatalogue(samples, catalogue, options = {}) {
+  const config = { ...DEFAULT_OPTIONS, ...options };
+  const usableSamples = samples.filter((sample) => sample?.keypoints?.length);
+
+  if (
+    usableSamples.length < config.minSequenceSamples ||
+    !catalogue?.dances?.length
+  ) {
+    return emptyMatch();
+  }
+
+  const candidates = catalogue.dances
+    .map((dance) => findBestSequence(usableSamples, dance, config))
     .sort((a, b) => b.score - a.score);
 
   const best = candidates[0] ?? null;
@@ -154,6 +196,125 @@ function findBestFrame(live, dance, config) {
   }
 
   return best;
+}
+
+function findBestSequence(samples, dance, config) {
+  let best = {
+    id: dance.id,
+    title: dance.title,
+    score: 0,
+    startTimestamp: null,
+    endTimestamp: null,
+    speedFactor: 1,
+    matchedSamples: 0,
+    keypointScore: 0,
+    angleScore: 0,
+  };
+
+  if (!dance.frames.length) return best;
+
+  const firstLiveTimestamp = samples[0].timestamp;
+  const liveDuration = samples.at(-1).timestamp - firstLiveTimestamp;
+  const latestStart = Math.max(0, dance.frames.at(-1).timestamp - liveDuration * 0.85);
+  const startStep = Math.max(0.2, 1 / (dance.sampledFps || 10));
+
+  for (let start = 0; start <= latestStart; start += startStep) {
+    for (const speedFactor of config.speedFactors) {
+      const comparison = compareSequenceAtStart(
+        samples,
+        dance,
+        start,
+        firstLiveTimestamp,
+        speedFactor,
+        config,
+      );
+
+      if (comparison.score > best.score) {
+        best = {
+          id: dance.id,
+          title: dance.title,
+          startTimestamp: round(start, 2),
+          endTimestamp: round(start + liveDuration * speedFactor, 2),
+          speedFactor,
+          ...comparison,
+        };
+      }
+    }
+  }
+
+  return best;
+}
+
+function compareSequenceAtStart(samples, dance, start, firstLiveTimestamp, speedFactor, config) {
+  let scoreSum = 0;
+  let keypointScoreSum = 0;
+  let angleScoreSum = 0;
+  let angleScoreCount = 0;
+  let matchedSamples = 0;
+
+  for (const sample of samples) {
+    const targetTimestamp = start + (sample.timestamp - firstLiveTimestamp) * speedFactor;
+    const referenceFrame = findNearestFrame(dance.frames, targetTimestamp);
+    if (
+      !referenceFrame ||
+      Math.abs(referenceFrame.timestamp - targetTimestamp) > config.maxTimeGapSeconds
+    ) {
+      continue;
+    }
+
+    const comparison = compareFrame(sample, referenceFrame, config);
+    if (comparison.comparableKeypoints < config.minComparableKeypoints) {
+      continue;
+    }
+
+    scoreSum += comparison.score;
+    keypointScoreSum += comparison.keypointScore;
+    if (comparison.angleScore !== null) {
+      angleScoreSum += comparison.angleScore;
+      angleScoreCount += 1;
+    }
+    matchedSamples += 1;
+  }
+
+  if (matchedSamples < config.minSequenceSamples) {
+    return {
+      score: 0,
+      matchedSamples,
+      keypointScore: 0,
+      angleScore: null,
+    };
+  }
+
+  const coverage = matchedSamples / samples.length;
+  const coveragePenalty = Math.min(1, coverage / 0.75);
+  return {
+    score: round((scoreSum / matchedSamples) * coveragePenalty, 1),
+    matchedSamples,
+    keypointScore: round(keypointScoreSum / matchedSamples, 1),
+    angleScore: angleScoreCount > 0 ? round(angleScoreSum / angleScoreCount, 1) : null,
+  };
+}
+
+function findNearestFrame(frames, timestamp) {
+  let low = 0;
+  let high = frames.length - 1;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (frames[mid].timestamp < timestamp) {
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  const previous = frames[high];
+  const next = frames[low];
+  if (!previous) return next ?? null;
+  if (!next) return previous;
+  return Math.abs(previous.timestamp - timestamp) <= Math.abs(next.timestamp - timestamp)
+    ? previous
+    : next;
 }
 
 function compareFrame(live, frame, config) {

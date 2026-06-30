@@ -3,8 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import classes from "./utils/yolo_classes.json";
 import { renderOverlay } from "./utils/render-overlay";
 import {
+  createPoseSample,
   loadPoseCatalogue,
-  matchPoseToCatalogue,
+  matchPoseSequenceToCatalogue,
   stabilizeMatches,
 } from "./utils/catalogue-matcher";
 
@@ -30,6 +31,9 @@ const DEFAULT_MODEL_CONFIG = {
   classes,
 };
 
+const COUNTDOWN_SECONDS = 5;
+const SEQUENCE_WINDOW_SECONDS = 4;
+
 function App() {
   const [processingStatus, setProcessingStatus] = useState({
     warnUpTime: 0,
@@ -45,9 +49,10 @@ function App() {
   const [customModels] = useState([]);
   const [customClasses] = useState([]);
   const [imgSrc] = useState(null);
-  const [details, setDetails] = useState([]);
   const [activeFeature, setActiveFeature] = useState(null);
   const [gameState, setGameState] = useState("idle");
+  const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
+  const [sequenceSampleCount, setSequenceSampleCount] = useState(0);
   const [currentMatch, setCurrentMatch] = useState({
     best: null,
     candidates: [],
@@ -73,8 +78,11 @@ function App() {
   const overlayRef = useRef(null);
   const cameraRef = useRef(null);
   const activeFeatureRef = useRef(activeFeature);
+  const gameStateRef = useRef(gameState);
   const isProcessingRef = useRef(false);
   const matchHistoryRef = useRef([]);
+  const liveSequenceRef = useRef([]);
+  const sequenceStartRef = useRef(0);
   const lastScoreTimeRef = useRef(0);
   const lastCommentRef = useRef("");
   const lastCommentTimeRef = useRef(0);
@@ -82,6 +90,39 @@ function App() {
   useEffect(() => {
     activeFeatureRef.current = activeFeature;
   }, [activeFeature]);
+
+  useEffect(() => {
+    gameStateRef.current = gameState;
+  }, [gameState]);
+
+  useEffect(() => {
+    if (gameState !== "countdown") return undefined;
+
+    const interval = window.setInterval(() => {
+      setCountdown((current) => {
+        if (current <= 1) {
+          window.clearInterval(interval);
+          sequenceStartRef.current = performance.now();
+          liveSequenceRef.current = [];
+          matchHistoryRef.current = [];
+          setSequenceSampleCount(0);
+          setGameState("detecting");
+          setPerformanceRating({
+            text: "CHERCHE",
+            color: "text-violet-300 font-bold animate-pulse",
+          });
+          setCoachComments([
+            "C'est parti. Je compare maintenant ton mouvement dans le temps.",
+          ]);
+          return 0;
+        }
+
+        return current - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [gameState]);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,20 +177,47 @@ function App() {
         DEFAULT_MODEL_CONFIG.classes,
       );
 
-      setDetails(data.results);
       setProcessingStatus((previous) => ({
         ...previous,
         inferenceTime: data.inferenceTime,
       }));
 
       const firstPose = data.results?.[0];
-      if (firstPose?.keypoints && catalogue) {
-        const instantMatch = matchPoseToCatalogue(firstPose, catalogue);
-        const now = performance.now();
+      const now = performance.now();
+      const state = gameStateRef.current;
+
+      if (state === "countdown") {
+        setDancePrecision(0);
+        setSequenceSampleCount(0);
+        setPerformanceRating({
+          text: `${countdown}`,
+          color: "text-cyan-300 font-black",
+        });
+      } else if (firstPose?.keypoints && catalogue && state === "detecting") {
+        const elapsedSeconds = (now - sequenceStartRef.current) / 1000;
+        const sample = createPoseSample(firstPose, elapsedSeconds);
+
+        if (sample) {
+          liveSequenceRef.current = liveSequenceRef.current
+            .concat(sample)
+            .filter(
+              (entry) => elapsedSeconds - entry.timestamp <= SEQUENCE_WINDOW_SECONDS,
+            );
+          setSequenceSampleCount(liveSequenceRef.current.length);
+        }
+
+        const instantMatch = matchPoseSequenceToCatalogue(
+          liveSequenceRef.current,
+          catalogue,
+          {
+            sequenceWindowSeconds: SEQUENCE_WINDOW_SECONDS,
+          },
+        );
         const stabilized = stabilizeMatches(
           matchHistoryRef.current,
           instantMatch,
           now,
+          2600,
         );
 
         matchHistoryRef.current = stabilized.history;
@@ -165,7 +233,9 @@ function App() {
             text: "MATCH",
             color: "text-emerald-400 font-extrabold",
           });
-          pushCoachComment(`Mouvement reconnu: ${displayMatch.title} (${precision}%).`);
+          pushCoachComment(
+            `Sequence reconnue: ${displayMatch.title} (${precision}%, ${displayMatch.matchedSamples} poses).`,
+          );
 
           if (now - lastScoreTimeRef.current > 1200) {
             setDanceScore((previous) => previous + precision);
@@ -176,7 +246,7 @@ function App() {
             text: "PROBABLE",
             color: "text-amber-300 font-bold",
           });
-          pushCoachComment(`Le plus proche semble etre ${displayMatch.title}, continue le mouvement.`);
+          pushCoachComment(`Le mouvement ressemble a ${displayMatch.title}, continue dans le tempo.`);
         } else {
           setPerformanceRating({
             text: "CHERCHE",
@@ -184,11 +254,14 @@ function App() {
           });
         }
       } else {
-        setDancePrecision(0);
-        setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
-        setStableMatch(null);
-        matchHistoryRef.current = [];
-        if (gameState === "detecting") {
+        if (state !== "detecting") {
+          setDancePrecision(0);
+          setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
+          setStableMatch(null);
+          matchHistoryRef.current = [];
+        }
+
+        if (state === "detecting") {
           setPerformanceRating({
             text: "EN ATTENTE",
             color: "text-slate-500",
@@ -198,7 +271,7 @@ function App() {
 
       isProcessingRef.current = false;
     },
-    [catalogue, gameState, pushCoachComment],
+    [catalogue, countdown, pushCoachComment],
   );
 
   const handleModelLoaded = useCallback((data) => {
@@ -309,15 +382,23 @@ function App() {
     loop();
   }, [postInferenceMessage]);
 
-  const resetDetection = useCallback(() => {
+  const prepareCountdown = useCallback(() => {
     matchHistoryRef.current = [];
+    liveSequenceRef.current = [];
+    sequenceStartRef.current = 0;
     setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
     setStableMatch(null);
     setDanceScore(0);
     setDancePrecision(0);
-    setPerformanceRating({ text: "CHERCHE", color: "text-violet-300 font-bold" });
+    setSequenceSampleCount(0);
+    setCountdown(COUNTDOWN_SECONDS);
+    setGameState("countdown");
+    setPerformanceRating({
+      text: `${COUNTDOWN_SECONDS}`,
+      color: "text-cyan-300 font-black",
+    });
     setCoachComments([
-      "Detection remise a zero. Reproduis un mouvement d'une video du catalogue.",
+      "Prepare-toi. Detection temporelle dans 5 secondes.",
     ]);
   }, []);
 
@@ -329,8 +410,10 @@ function App() {
         overlayRef.current.height = 0;
       }
       setActiveFeature(null);
-      setDetails([]);
       setGameState("idle");
+      setCountdown(COUNTDOWN_SECONDS);
+      setSequenceSampleCount(0);
+      liveSequenceRef.current = [];
       setPerformanceRating({ text: "PRET", color: "text-slate-400" });
       return;
     }
@@ -351,11 +434,10 @@ function App() {
     const success = await openCamera(selectedDeviceId);
 
     if (success) {
-      resetDetection();
       setActiveFeature("camera");
-      setGameState("detecting");
+      prepareCountdown();
     }
-  }, [activeFeature, closeCamera, getCameras, openCamera, resetDetection]);
+  }, [activeFeature, closeCamera, getCameras, openCamera, prepareCountdown]);
 
   const handleCameraLoad = useCallback(() => {
     startCameraLoop();
@@ -419,9 +501,13 @@ function App() {
                         : "bg-slate-600"
                     }`}
                   ></span>
-                  IA : {activeFeature === "loading" ? "Initialisation" : "Comparaison catalogue local"}
+                  IA : {activeFeature === "loading"
+                    ? "Initialisation"
+                    : gameState === "countdown"
+                      ? "Compte a rebours"
+                      : "Comparaison temporelle locale"}
                 </span>
-                {gameState === "detecting" && (
+                {(gameState === "detecting" || gameState === "countdown") && (
                   <span className="text-cyan-400">Precision : {Math.round(dancePrecision)}%</span>
                 )}
               </div>
@@ -434,10 +520,14 @@ function App() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-wider text-slate-400 font-bold">
-                  Detection stable
+                  Detection temporelle
                 </p>
                 <h2 className="text-2xl font-black text-white mt-1">
-                  {shownMatch ? shownMatch.title : "Aucune danse"}
+                  {gameState === "countdown"
+                    ? `Depart dans ${countdown}`
+                    : shownMatch
+                      ? shownMatch.title
+                      : "Aucune danse"}
                 </h2>
               </div>
               <span className={`text-xl font-black ${performanceRating.color}`}>
@@ -464,8 +554,8 @@ function App() {
                 <p className="text-2xl font-black text-violet-300">{danceScore}</p>
               </div>
               <div className="bg-[#050818]/70 border border-violet-500/20 rounded-lg p-3">
-                <p className="text-xs text-slate-400 uppercase font-bold">Squelette</p>
-                <p className="text-2xl font-black text-violet-300">{details.length}</p>
+                <p className="text-xs text-slate-400 uppercase font-bold">Sequence</p>
+                <p className="text-2xl font-black text-violet-300">{sequenceSampleCount}</p>
               </div>
             </div>
           </div>
@@ -503,7 +593,9 @@ function App() {
             <div className="mt-4 flex flex-col gap-3">
               {candidates.length === 0 ? (
                 <p className="text-sm text-slate-400">
-                  Aucune pose camera comparable pour le moment.
+                  {gameState === "countdown"
+                    ? "La comparaison commence apres le compte a rebours."
+                    : "Pas encore assez de poses dans la sequence live."}
                 </p>
               ) : (
                 candidates.map((candidate) => (
@@ -523,7 +615,7 @@ function App() {
                       ></div>
                     </div>
                     <p className="text-xs text-slate-500">
-                      frame {candidate.frameIndex ?? "-"} - {candidate.comparableKeypoints} points
+                      segment {candidate.startTimestamp ?? "-"}s - {candidate.matchedSamples ?? 0} poses
                     </p>
                   </div>
                 ))
@@ -551,11 +643,11 @@ function App() {
               {activeFeature === "camera" ? "Arreter la camera" : "Activer la camera"}
             </button>
             <button
-              onClick={resetDetection}
+              onClick={prepareCountdown}
               className="px-5 py-2.5 rounded-lg bg-[#050818] hover:bg-violet-950 text-violet-200 border border-violet-500/30 font-bold transition-all cursor-pointer"
               disabled={activeFeature !== "camera"}
             >
-              Reinitialiser
+              Relancer 5s
             </button>
           </div>
         </div>

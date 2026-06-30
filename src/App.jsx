@@ -737,49 +737,7 @@ function App() {
               )}
             </div>
           )}
-          <div className="mt-2 flex flex-col gap-2">
-            <label className="text-xs text-slate-400">Mode de recherche web :</label>
-            <select
-              onChange={async (e) => {
-                const val = e.target.value;
-                if (!val) {
-                  setReferenceVideoId("");
-                  setIsDanceLocked(false);
-                  setDetectedDanceName(null);
-                  setCoachComments((prev) => ["Retour au mode détection automatique. Faites un geste !", ...prev].slice(0, 5));
-                } else {
-                  setIsSearchingWeb(true);
-                  setIsDanceLocked(false);
-                  setDetectedDanceName(val);
-                  setCoachComments((prev) => [`🔍 Recherche manuelle sur le web pour : "${val}"...`, ...prev].slice(0, 5));
-                  
-                  try {
-                    const result = await searchDanceVideoOnWeb(val, danceSourcePlatform);
-                    if (result && result.videoId) {
-                      setReferenceVideoId(result.videoId);
-                      setGameState("playing");
-                      setDanceScore(0);
-                      setDancePrecision(0);
-                      setCoachComments((prev) => [`🎵 Vidéo trouvée : "${result.title}" ! Début de la danse.`, ...prev].slice(0, 5));
-                    } else {
-                      setCoachComments((prev) => [`❌ Vidéo non trouvée pour "${val}".`, ...prev].slice(0, 5));
-                    }
-                  } catch (err) {
-                    setCoachComments((prev) => [`❌ Erreur réseau : ${err.message}`, ...prev].slice(0, 5));
-                  } finally {
-                    setIsSearchingWeb(false);
-                  }
-                }
-              }}
-              value={detectedDanceName || ""}
-              className="bg-[#050818] border border-violet-500/30 rounded px-2 py-1.5 text-sm text-slate-300 focus:outline-none focus:border-violet-500"
-            >
-              <option value="">-- Mode Détection Auto (IA) --</option>
-              <option value="Rasputin">Rasputin - Boney M</option>
-              <option value="Macarena">Macarena - Los Del Rio</option>
-              <option value="Never Gonna Give You Up">Never Gonna Give You Up - Rick Astley</option>
-            </select>
-          </div>
+
         </div>
 
         {/* Colonne 2 : Résultat de l'épreuve */}

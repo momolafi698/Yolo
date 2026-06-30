@@ -81,3 +81,25 @@
     @apply py-1.5 px-2 text-xs;
   }
 }
+
+/* Thème Just Dance Captor */
+.card-violet {
+  @apply bg-[#0e1738] border border-violet-500/40 rounded-xl p-4 shadow-lg shadow-violet-950/20 text-left transition-all duration-300 hover:border-violet-500;
+}
+
+.captor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .captor-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.text-violet-neon {
+  text-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+}
+

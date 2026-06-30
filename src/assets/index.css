@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 :root {
-  color-scheme:dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #2a2a2a;
+  color-scheme: dark;
+  color: #f1f5f9;
+  background-color: #080d24; /* Bleu foncé technologique */
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -14,6 +14,6 @@ body {
   display: flex;
   justify-content: center;
   text-align: center;  
-  @apply leading-relaxed tracking-wide font-bold
+  @apply leading-relaxed tracking-wide font-sans bg-[#080d24] text-slate-100;
 }
 

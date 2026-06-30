@@ -6,7 +6,9 @@ export async function modelLoader(model_path, backend, numThreads = 1) {
   // activate SIMD (faster cpu), multi-threading, if wasm backend
   // default is false, 1 thread
   // env.wasm.simd = true;
-  // env.wasm.numThreads = numThreads;
+  if (backend === "wasm") {
+    env.wasm.numThreads = numThreads;
+  }
 
   let yolo_model;
   const sessionOptions = {

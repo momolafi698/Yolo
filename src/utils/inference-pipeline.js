@@ -12,8 +12,8 @@ export async function inferencePipeline(imageData, session, config) {
   const matsToDelete = [];
   let inputTensor = null;
   let outputs = null;
-  let output0 = null;
-  let output1 = null;
+  let output0;
+  let output1;
 
   try {
     // Convert ImageData to cv.Mat

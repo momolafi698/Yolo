@@ -793,6 +793,7 @@ function App() {
 
   const imageLoad = useCallback(() => {}, []);
 
+  const candidates = currentMatch.candidates.slice(0, 2);
   const shownMatch = stableMatch ?? currentMatch.best;
 
   return (

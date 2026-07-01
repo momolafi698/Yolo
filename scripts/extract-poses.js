@@ -439,25 +439,46 @@ function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
+// Minimum reliable scale in pixels. Shoulder widths below this indicate a wrong
+// keypoint detection and would blow up all normalized coordinates.
+const MIN_NORM_SCALE = 15;
+
 function normalizeKeypoints(detection, threshold) {
   const kps = detection.keypoints;
   const leftHip = kps[KP.leftHip];
   const rightHip = kps[KP.rightHip];
   const leftShoulder = kps[KP.leftShoulder];
   const rightShoulder = kps[KP.rightShoulder];
-  const [boxX, boxY, boxW, boxH] = detection.bbox;
 
-  const origin = visible(leftHip, threshold) && visible(rightHip, threshold)
-    ? midpoint(leftHip, rightHip)
-    : { x: boxX + boxW / 2, y: boxY + boxH / 2 };
+  // Both hips required for a position-invariant origin — no bbox fallback.
+  if (!visible(leftHip, threshold) || !visible(rightHip, threshold)) return null;
+  const origin = midpoint(leftHip, rightHip);
 
+  // Primary scale: shoulder width (body-proportional, scale-invariant).
   let scale = null;
   if (visible(leftShoulder, threshold) && visible(rightShoulder, threshold)) {
-    scale = distance(leftShoulder, rightShoulder);
+    const d = distance(leftShoulder, rightShoulder);
+    if (d >= MIN_NORM_SCALE) scale = d;
   }
-  if (!scale || scale < 1) {
-    scale = Math.max(boxW, boxH, 1);
+
+  // Secondary scale: torso height (hip midpoint → shoulder midpoint).
+  // Used when both shoulders are occluded or detected too close together.
+  if (!scale) {
+    const visShoulders = [
+      visible(leftShoulder, threshold) ? leftShoulder : null,
+      visible(rightShoulder, threshold) ? rightShoulder : null,
+    ].filter(Boolean);
+    if (visShoulders.length > 0) {
+      const shoulderMid = visShoulders.length === 2
+        ? midpoint(leftShoulder, rightShoulder)
+        : visShoulders[0];
+      const torso = distance(origin, shoulderMid);
+      if (torso >= MIN_NORM_SCALE) scale = torso;
+    }
   }
+
+  // No reliable scale available — skip normalization for this frame.
+  if (!scale) return null;
 
   return {
     origin: { x: round(origin.x), y: round(origin.y) },

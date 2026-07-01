@@ -57,8 +57,11 @@ export function matchPoseToCatalogue(pose, catalogue, options = {}) {
     return emptyMatch();
   }
 
+  const normalized = normalizeKeypoints(pose.keypoints, pose.bbox, config.keypointThreshold);
+  if (!normalized) return emptyMatch();
+
   const live = {
-    keypoints: normalizeKeypoints(pose.keypoints, pose.bbox, config.keypointThreshold),
+    keypoints: normalized,
     angles: calculateAngles(pose.keypoints, config.keypointThreshold),
   };
 
@@ -82,9 +85,12 @@ export function createPoseSample(pose, timestamp, options = {}) {
   const config = { ...DEFAULT_OPTIONS, ...options };
   if (!pose?.keypoints) return null;
 
+  const normalized = normalizeKeypoints(pose.keypoints, pose.bbox, config.keypointThreshold);
+  if (!normalized) return null;
+
   return {
     timestamp,
-    keypoints: normalizeKeypoints(pose.keypoints, pose.bbox, config.keypointThreshold),
+    keypoints: normalized,
     angles: calculateAngles(pose.keypoints, config.keypointThreshold),
   };
 }
@@ -150,7 +156,14 @@ export function stabilizeMatches(history, currentMatch, now, windowMs = 2200) {
 
 function prepareDance(entry) {
   const frames = entry.data.frames
-    .filter((frame) => frame.person)
+    .filter((frame) => {
+      if (!frame.person) return false;
+      // Reject frames whose normalization scale is below the reliable threshold.
+      // This catches existing data where shoulders were misdetected (scale ~2–14px)
+      // which would blow up all normalized coordinates.
+      const scale = frame.person.normalized?.scale ?? 0;
+      return scale >= MIN_NORM_SCALE;
+    })
     .map((frame) => ({
       frameIndex: frame.frameIndex,
       timestamp: frame.timestamp,
@@ -391,24 +404,41 @@ function compareAngles(liveAngles, referenceAngles) {
   return Math.max(0, 100 * (1 - averageDiff / 90));
 }
 
+const MIN_NORM_SCALE = 15;
+
 function normalizeKeypoints(keypoints, bbox, threshold) {
   const leftHip = keypoints[KP.leftHip];
   const rightHip = keypoints[KP.rightHip];
   const leftShoulder = keypoints[KP.leftShoulder];
   const rightShoulder = keypoints[KP.rightShoulder];
-  const [boxX = 0, boxY = 0, boxW = 1, boxH = 1] = bbox ?? [];
 
-  const origin = visible(leftHip, threshold) && visible(rightHip, threshold)
-    ? midpoint(leftHip, rightHip)
-    : { x: boxX + boxW / 2, y: boxY + boxH / 2 };
+  // Both hips required for a position-invariant origin.
+  if (!visible(leftHip, threshold) || !visible(rightHip, threshold)) return null;
+  const origin = midpoint(leftHip, rightHip);
 
+  // Primary scale: shoulder width.
   let scale = null;
   if (visible(leftShoulder, threshold) && visible(rightShoulder, threshold)) {
-    scale = distance(leftShoulder, rightShoulder);
+    const d = distance(leftShoulder, rightShoulder);
+    if (d >= MIN_NORM_SCALE) scale = d;
   }
-  if (!scale || scale < 1) {
-    scale = Math.max(boxW, boxH, 1);
+
+  // Secondary scale: torso height.
+  if (!scale) {
+    const visShoulders = [
+      visible(leftShoulder, threshold) ? leftShoulder : null,
+      visible(rightShoulder, threshold) ? rightShoulder : null,
+    ].filter(Boolean);
+    if (visShoulders.length > 0) {
+      const shoulderMid = visShoulders.length === 2
+        ? midpoint(leftShoulder, rightShoulder)
+        : visShoulders[0];
+      const torso = distance(origin, shoulderMid);
+      if (torso >= MIN_NORM_SCALE) scale = torso;
+    }
   }
+
+  if (!scale) return null;
 
   return keypoints.map((point) => ({
     name: point.name,

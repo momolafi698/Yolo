@@ -17,6 +17,11 @@ import ModelStatus from "./components/ModelStatus";
 import PoseOverlayTool from "./components/PoseOverlayTool";
 import SettingsPanel from "./components/SettingsPanel";
 
+// Cap source frames at this dimension before sending to the inference worker.
+// The letterbox targets 640px anyway, so sending full 1080p is pure waste.
+// CSS object-fit:contain on the overlay canvas handles the upscale visually.
+const MAX_INFER_DIM = 640;
+
 const DEFAULT_MODEL_CONFIG = {
   inputShape: [1, 3, 640, 640],
   overlaySize: [640, 640],
@@ -412,20 +417,24 @@ function App() {
     isProcessingRef.current = true;
 
     try {
-      const bitmap = await createImageBitmap(mediaElement);
+      const vw = mediaElement.videoWidth;
+      const vh = mediaElement.videoHeight;
+      const scale = Math.min(1, MAX_INFER_DIM / Math.max(vw, vh));
+      const inferW = Math.round(vw * scale);
+      const inferH = Math.round(vh * scale);
 
-      if (
-        overlayRef.current.width !== mediaElement.videoWidth ||
-        overlayRef.current.height !== mediaElement.videoHeight
-      ) {
-        overlayRef.current.width = mediaElement.videoWidth;
-        overlayRef.current.height = mediaElement.videoHeight;
+      const bitmap = await createImageBitmap(mediaElement, {
+        resizeWidth: inferW,
+        resizeHeight: inferH,
+        resizeQuality: "low",
+      });
+
+      if (overlayRef.current.width !== inferW || overlayRef.current.height !== inferH) {
+        overlayRef.current.width = inferW;
+        overlayRef.current.height = inferH;
       }
 
-      DEFAULT_MODEL_CONFIG.overlaySize = [
-        overlayRef.current.width,
-        overlayRef.current.height,
-      ];
+      DEFAULT_MODEL_CONFIG.overlaySize = [inferW, inferH];
 
       postInferenceMessage(
         {

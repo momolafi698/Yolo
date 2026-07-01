@@ -254,14 +254,12 @@ function App() {
       audio.addEventListener("ended", () => {
         audioTimeoutRef.current = setTimeout(() => {
           const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
-          if (dancesWithAudio.length > 1) {
-            const currentIndex = dancesWithAudio.findIndex((d) => d.id === selectedDance.id);
-            const nextIndex = (currentIndex + 1) % dancesWithAudio.length;
-            const nextDance = dancesWithAudio[nextIndex];
+          const currentIndex = dancesWithAudio.findIndex((d) => d.id === selectedDance.id);
+          if (currentIndex !== -1 && currentIndex < dancesWithAudio.length - 1) {
+            const nextDance = dancesWithAudio[currentIndex + 1];
             setSelectedDanceId(nextDance.id);
-          } else if (dancesWithAudio.length === 1) {
-            audio.currentTime = 0;
-            audio.play().catch((err) => console.warn("Replay failed:", err));
+          } else {
+            stopMusic();
           }
         }, 3000);
       });

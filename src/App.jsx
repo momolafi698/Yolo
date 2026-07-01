@@ -82,6 +82,8 @@ function App() {
   const [stableMatch, setStableMatch] = useState(null);
   const [danceScore, setDanceScore] = useState(0);
   const [dancePrecision, setDancePrecision] = useState(0);
+  const [lastDanceInfo, setLastDanceInfo] = useState(null);
+  const [pauseCountdown, setPauseCountdown] = useState(0);
   const [performanceRating, setPerformanceRating] = useState({
     text: "PRET",
     color: "text-slate-400",
@@ -111,6 +113,11 @@ function App() {
   const lastCommentTimeRef = useRef(0);
   const currentAudioRef = useRef(null);
   const audioTimeoutRef = useRef(null);
+  const danceScoreRef = useRef(danceScore);
+
+  useEffect(() => {
+    danceScoreRef.current = danceScore;
+  }, [danceScore]);
 
   useEffect(() => {
     activeFeatureRef.current = activeFeature;
@@ -216,7 +223,8 @@ function App() {
 
   const stopMusic = useCallback(() => {
     if (audioTimeoutRef.current) {
-      clearTimeout(audioTimeoutRef.current);
+      window.clearInterval(audioTimeoutRef.current);
+      window.clearTimeout(audioTimeoutRef.current);
       audioTimeoutRef.current = null;
     }
     if (currentAudioRef.current) {
@@ -224,6 +232,8 @@ function App() {
       currentAudioRef.current.currentTime = 0;
       currentAudioRef.current = null;
     }
+    setLastDanceInfo(null);
+    setPauseCountdown(0);
   }, []);
 
   const playMusicForCamera = useCallback(() => {
@@ -252,18 +262,38 @@ function App() {
       audio.volume = 0.4;
 
       audio.addEventListener("ended", () => {
-        audioTimeoutRef.current = setTimeout(() => {
-          const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
-          if (dancesWithAudio.length > 1) {
-            const currentIndex = dancesWithAudio.findIndex((d) => d.id === selectedDance.id);
-            const nextIndex = (currentIndex + 1) % dancesWithAudio.length;
-            const nextDance = dancesWithAudio[nextIndex];
-            setSelectedDanceId(nextDance.id);
-          } else if (dancesWithAudio.length === 1) {
-            audio.currentTime = 0;
-            audio.play().catch((err) => console.warn("Replay failed:", err));
+        const finalScore = danceScoreRef.current;
+        setLastDanceInfo({
+          title: selectedDance.title,
+          score: finalScore,
+        });
+        setGameState("pause");
+        setPauseCountdown(5);
+
+        let remaining = 5;
+        const intervalId = window.setInterval(() => {
+          remaining -= 1;
+          setPauseCountdown(remaining);
+          if (remaining <= 0) {
+            window.clearInterval(intervalId);
+            setLastDanceInfo(null);
+            
+            const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
+            if (dancesWithAudio.length > 1) {
+              const currentIndex = dancesWithAudio.findIndex((d) => d.id === selectedDance.id);
+              const nextIndex = (currentIndex + 1) % dancesWithAudio.length;
+              const nextDance = dancesWithAudio[nextIndex];
+              setSelectedDanceId(nextDance.id);
+              prepareCountdown();
+            } else if (dancesWithAudio.length === 1) {
+              prepareCountdown();
+              audio.currentTime = 0;
+              audio.play().catch((err) => console.warn("Replay failed:", err));
+            }
           }
-        }, 3000);
+        }, 1000);
+
+        audioTimeoutRef.current = intervalId;
       });
 
       audio.play().catch((err) => {
@@ -271,7 +301,7 @@ function App() {
       });
       currentAudioRef.current = audio;
     }
-  }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId]);
+  }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId, prepareCountdown]);
 
   useEffect(() => {
     if (activeFeature === "camera") {
@@ -728,6 +758,41 @@ function App() {
             <div className="absolute inset-0 bg-black/70 flex items-center justify-center flex-col gap-3 rounded-2xl">
               <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
               <span className="text-violet-300 font-bold">Chargement du modele...</span>
+            </div>
+          )}
+
+          {gameState === "pause" && lastDanceInfo && (
+            <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center flex-col gap-6 rounded-2xl p-6 text-center animate-fade-in border border-violet-500/30 shadow-[0_0_50px_rgba(139,92,246,0.3)] z-50">
+              <div className="animate-bounce">
+                <span className="text-5xl">🏆</span>
+              </div>
+              <div>
+                <h2 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-500 uppercase tracking-widest text-violet-neon">
+                  Musique Terminée !
+                </h2>
+                <p className="text-slate-300 text-lg mt-1 font-semibold">{lastDanceInfo.title}</p>
+              </div>
+
+              <div className="bg-[#050818]/60 border border-violet-500/30 rounded-2xl px-8 py-6 shadow-inner flex flex-col items-center gap-2 min-w-[240px]">
+                <span className="text-xs uppercase tracking-wider text-violet-400 font-bold">Votre Score</span>
+                <span className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400 animate-pulse">
+                  {lastDanceInfo.score}
+                </span>
+                <span className="text-sm font-semibold text-slate-400 mt-2">
+                  {lastDanceInfo.score >= 3000 ? "⭐ RANG S - INCROYABLE ! ⭐" :
+                   lastDanceInfo.score >= 1500 ? "🔥 RANG A - SUPER STAR ! 🔥" :
+                   lastDanceInfo.score >= 800  ? "✨ RANG B - TRÈS BIEN ! ✨" :
+                   lastDanceInfo.score >= 300  ? "👍 RANG C - BIEN JOUÉ ! 👍" :
+                                                 "🌱 RANG D - CONTINUE DE T'ENTRAÎNER ! 🌱"}
+                </span>
+              </div>
+
+              <div className="flex flex-col items-center gap-2 mt-2">
+                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Prochaine danse dans</span>
+                <div className="flex items-center justify-center w-12 h-12 rounded-full border-2 border-fuchsia-500 text-fuchsia-400 font-black text-xl bg-fuchsia-500/10 shadow-[0_0_15px_rgba(217,70,239,0.4)]">
+                  {pauseCountdown}
+                </div>
+              </div>
             </div>
           )}
 

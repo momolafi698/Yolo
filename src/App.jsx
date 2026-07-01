@@ -243,14 +243,28 @@ function App() {
       const baseUrl = import.meta.env.BASE_URL || "/";
       const audioPath = `${baseUrl.replace(/\/+$/, "")}/${selectedDance.audioUrl.replace(/^\/+/, "")}`;
       const audio = new Audio(audioPath);
-      audio.loop = true;
+      audio.loop = false;
       audio.volume = 0.4;
+
+      audio.addEventListener("ended", () => {
+        const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
+        if (dancesWithAudio.length > 1) {
+          const currentIndex = dancesWithAudio.findIndex((d) => d.id === selectedDance.id);
+          const nextIndex = (currentIndex + 1) % dancesWithAudio.length;
+          const nextDance = dancesWithAudio[nextIndex];
+          setSelectedDanceId(nextDance.id);
+        } else if (dancesWithAudio.length === 1) {
+          audio.currentTime = 0;
+          audio.play().catch((err) => console.warn("Replay failed:", err));
+        }
+      });
+
       audio.play().catch((err) => {
         console.warn("Autoplay block or music play failed:", err);
       });
       currentAudioRef.current = audio;
     }
-  }, [catalogue, selectedDanceId, stopMusic]);
+  }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId]);
 
   useEffect(() => {
     if (activeFeature === "camera") {

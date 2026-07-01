@@ -13,7 +13,7 @@ const PROJECT_ROOT = path.resolve(__dirname, "..");
 let ffmpegPath = null;
 try {
   ffmpegPath = require("ffmpeg-static");
-} catch (e) {
+} catch {
   // ignore
 }
 

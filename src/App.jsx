@@ -262,9 +262,11 @@ function App() {
             setLastDanceInfo(null);
             
             const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
-            const currentIndex = dancesWithAudio.findIndex((d) => d.id === selectedDance.id);
-            if (currentIndex !== -1 && currentIndex < dancesWithAudio.length - 1) {
-              const nextDance = dancesWithAudio[currentIndex + 1];
+            if (dancesWithAudio.length > 0) {
+              const otherDances = dancesWithAudio.filter((d) => d.id !== selectedDance.id);
+              const nextDance = otherDances.length > 0
+                ? otherDances[Math.floor(Math.random() * otherDances.length)]
+                : selectedDance;
               setSelectedDanceId(nextDance.id);
               prepareCountdown();
             } else {

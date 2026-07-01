@@ -20,15 +20,15 @@ import SettingsPanel from "./components/SettingsPanel";
 const DEFAULT_MODEL_CONFIG = {
   inputShape: [1, 3, 640, 640],
   overlaySize: [640, 640],
-  iouThreshold: 0.35,
-  scoreThreshold: 0.45,
+  iouThreshold: 0.45,
+  scoreThreshold: 0.35,
   backend: "wasm",
   numThreads: 1,
   enableNMS: false,
-  model: "yolo26n",
+  model: "yolo26s",
   modelPath: "",
   task: "pose",
-  imgszType: "dynamic",
+  imgszType: "letterbox",
   classes,
 };
 

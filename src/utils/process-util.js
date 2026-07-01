@@ -6,13 +6,21 @@ import { Tensor } from "onnxruntime-web/webgpu";
  *
  * @param {cv.Mat} srcMat - input image Mat
  * @param {[Number, Number]} size - Output size [width, height]
- * @param {String} imgszType - Processing type, "dynamic" or "zeroPad"
- * @returns {[ort.Tensor, Number, Number]} - return [inputTensor, xRatio, yRatio]
+ * @param {String} imgszType - Processing type, "letterbox", "dynamic" or "zeroPad"
+ * @returns {[ort.Tensor, Number, Number, Number, Number]} - return [inputTensor, xRatio, yRatio, xOffset, yOffset]
  */
 const preProcessImage = (srcMat, size, imgszType) => {
-  let preProcessed, xRatio, yRatio, inputTensor, divWidth, divHeight;
+  let preProcessed, xRatio, yRatio, xOffset = 0, yOffset = 0, inputTensor, divWidth, divHeight;
 
-  if (imgszType === "dynamic") {
+  if (imgszType === "letterbox") {
+    const IMAGE_SIZE = 640;
+    [preProcessed, xRatio, yRatio, xOffset, yOffset] = imgLetterbox(srcMat, IMAGE_SIZE);
+    inputTensor = new Tensor(
+      "float32",
+      new Float32Array(preProcessed.data32F),
+      [1, 3, IMAGE_SIZE, IMAGE_SIZE],
+    );
+  } else if (imgszType === "dynamic") {
     [preProcessed, xRatio, yRatio, divWidth, divHeight] = imgDynamic(
       srcMat,
       size,
@@ -33,7 +41,47 @@ const preProcessImage = (srcMat, size, imgszType) => {
   }
   preProcessed.delete();
 
-  return [inputTensor, xRatio, yRatio];
+  return [inputTensor, xRatio, yRatio, xOffset, yOffset];
+};
+
+/**
+ * Pre-process input image using YOLO-standard letterbox: uniform scale to imageSize×imageSize
+ * with gray (114/255) padding. Matches the extract-poses.js extraction pipeline exactly.
+ *
+ * @param {cv.Mat} mat - Input image Mat (RGBA)
+ * @param {Number} imageSize - Model input square size (default 640)
+ * @returns {[cv.Mat, Number, Number, Number, Number]} [blob, xRatio, yRatio, xOffset, yOffset]
+ */
+const imgLetterbox = (mat, imageSize = 640) => {
+  cv.cvtColor(mat, mat, cv.COLOR_RGBA2RGB);
+
+  const ratio = Math.min(imageSize / mat.cols, imageSize / mat.rows);
+  const resizedWidth = Math.round(mat.cols * ratio);
+  const resizedHeight = Math.round(mat.rows * ratio);
+  const padX = Math.floor((imageSize - resizedWidth) / 2);
+  const padY = Math.floor((imageSize - resizedHeight) / 2);
+
+  const resized = new cv.Mat();
+  cv.resize(mat, resized, new cv.Size(resizedWidth, resizedHeight), 0, 0, cv.INTER_LINEAR);
+
+  const canvas = new cv.Mat(imageSize, imageSize, cv.CV_8UC3, new cv.Scalar(114, 114, 114));
+  const roi = canvas.roi(new cv.Rect(padX, padY, resizedWidth, resizedHeight));
+  resized.copyTo(roi);
+  roi.delete();
+  resized.delete();
+
+  const preProcessed = cv.blobFromImage(
+    canvas,
+    1 / 255.0,
+    new cv.Size(imageSize, imageSize),
+    new cv.Scalar(0, 0, 0, 0),
+    false,
+    false,
+  );
+  canvas.delete();
+
+  const scale = 1 / ratio;
+  return [preProcessed, scale, scale, padX * scale, padY * scale];
 };
 
 /**

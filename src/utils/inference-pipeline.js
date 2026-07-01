@@ -22,8 +22,8 @@ export async function inferencePipeline(imageData, session, config) {
     matsToDelete.push(srcMat);
 
     // Pre-process img, inference
-    let xRatio, yRatio;
-    [inputTensor, xRatio, yRatio] = preProcessImage(
+    let xRatio, yRatio, xOffset, yOffset;
+    [inputTensor, xRatio, yRatio, xOffset, yOffset] = preProcessImage(
       srcMat,
       config.overlaySize,
       config.imgszType,
@@ -52,6 +52,8 @@ export async function inferencePipeline(imageData, session, config) {
             config.scoreThreshold,
             xRatio,
             yRatio,
+            xOffset,
+            yOffset,
           );
         } else {
           results = postProcessDetectEnd2End(
@@ -59,6 +61,8 @@ export async function inferencePipeline(imageData, session, config) {
             config.scoreThreshold,
             xRatio,
             yRatio,
+            xOffset,
+            yOffset,
           );
         }
         break;
@@ -69,6 +73,8 @@ export async function inferencePipeline(imageData, session, config) {
             config.scoreThreshold,
             xRatio,
             yRatio,
+            xOffset,
+            yOffset,
           );
         } else {
           results = postProcessPoseEnd2End(
@@ -76,6 +82,8 @@ export async function inferencePipeline(imageData, session, config) {
             config.scoreThreshold,
             xRatio,
             yRatio,
+            xOffset,
+            yOffset,
           );
         }
         break;
@@ -87,6 +95,8 @@ export async function inferencePipeline(imageData, session, config) {
             config.scoreThreshold,
             xRatio,
             yRatio,
+            xOffset,
+            yOffset,
           );
         } else {
           [results, masksData] = postProcessSegmentEnd2End(
@@ -95,6 +105,8 @@ export async function inferencePipeline(imageData, session, config) {
             config.scoreThreshold,
             xRatio,
             yRatio,
+            xOffset,
+            yOffset,
           );
         }
         break;
@@ -160,7 +172,7 @@ export async function inferencePipeline(imageData, session, config) {
  * @param {number} yRatio - Height scaling ratio.
  * @returns {Array<Object>} Array of detection results: [{bbox, classIdx, score}, ...].
  */
-function postProcessDetect(rawTensor, scoreThreshold = 0.45, xRatio, yRatio) {
+function postProcessDetect(rawTensor, scoreThreshold = 0.45, xRatio, yRatio, xOffset = 0, yOffset = 0) {
   const NUM_PREDICTIONS = rawTensor.dims[2];
   const NUM_BBOX_ATTRS = 4;
   const NUM_SCORES = 80;
@@ -192,8 +204,8 @@ function postProcessDetect(rawTensor, scoreThreshold = 0.45, xRatio, yRatio) {
 
     const w = predictions[i + bboxOffset2] * xRatio;
     const h = predictions[i + bboxOffset3] * yRatio;
-    const tlx = predictions[i + bboxOffset0] * xRatio - 0.5 * w;
-    const tly = predictions[i + bboxOffset1] * yRatio - 0.5 * h;
+    const tlx = predictions[i + bboxOffset0] * xRatio - 0.5 * w - xOffset;
+    const tly = predictions[i + bboxOffset1] * yRatio - 0.5 * h - yOffset;
 
     // if not enough space
     if (resultCount >= results.length) {
@@ -221,7 +233,7 @@ function postProcessDetect(rawTensor, scoreThreshold = 0.45, xRatio, yRatio) {
  * @param {number} yRatio - Height scale ratio
  * @returns {Array<Object>}
  */
-function postProcessDetectEnd2End(rawTensor, scoreThreshold, xRatio, yRatio) {
+function postProcessDetectEnd2End(rawTensor, scoreThreshold, xRatio, yRatio, xOffset = 0, yOffset = 0) {
   const predictions = rawTensor.data;
 
   // dims expected: [1, 300, 6]
@@ -240,10 +252,10 @@ function postProcessDetectEnd2End(rawTensor, scoreThreshold, xRatio, yRatio) {
     // 5: class_id
     const classIdx = Math.round(predictions[offset + 5]);
 
-    const x1 = predictions[offset] * xRatio;
-    const y1 = predictions[offset + 1] * yRatio;
-    const x2 = predictions[offset + 2] * xRatio;
-    const y2 = predictions[offset + 3] * yRatio;
+    const x1 = predictions[offset] * xRatio - xOffset;
+    const y1 = predictions[offset + 1] * yRatio - yOffset;
+    const x2 = predictions[offset + 2] * xRatio - xOffset;
+    const y2 = predictions[offset + 3] * yRatio - yOffset;
 
     // Convert to [x, y, w, h]
     const w = x2 - x1;
@@ -268,7 +280,7 @@ function postProcessDetectEnd2End(rawTensor, scoreThreshold, xRatio, yRatio) {
  * @param {number} yRatio - Height scaling ratio.
  * @returns {Array<Object>} Array of pose results: [{bbox, score, keypoints}, ...].
  */
-function postProcessPose(rawTensor, scoreThreshold = 0.45, xRatio, yRatio) {
+function postProcessPose(rawTensor, scoreThreshold = 0.45, xRatio, yRatio, xOffset = 0, yOffset = 0) {
   // post process
   const NUM_PREDICTIONS = rawTensor.dims[2];
   const NUM_BBOX_ATTRS = 5;
@@ -287,15 +299,15 @@ function postProcessPose(rawTensor, scoreThreshold = 0.45, xRatio, yRatio) {
 
     const w = bboxData[i + NUM_PREDICTIONS * 2] * xRatio;
     const h = bboxData[i + NUM_PREDICTIONS * 3] * yRatio;
-    const tlx = bboxData[i] * xRatio - 0.5 * w;
-    const tly = bboxData[i + NUM_PREDICTIONS] * yRatio - 0.5 * h;
+    const tlx = bboxData[i] * xRatio - 0.5 * w - xOffset;
+    const tly = bboxData[i + NUM_PREDICTIONS] * yRatio - 0.5 * h - yOffset;
 
     const keypoints = new Array(NUM_KEYPOINTS);
     for (let kp = 0; kp < NUM_KEYPOINTS; kp++) {
       const baseIdx = kp * KEYPOINT_DIMS * NUM_PREDICTIONS + i;
       keypoints[kp] = {
-        x: keypointsData[baseIdx] * xRatio,
-        y: keypointsData[baseIdx + NUM_PREDICTIONS] * yRatio,
+        x: keypointsData[baseIdx] * xRatio - xOffset,
+        y: keypointsData[baseIdx + NUM_PREDICTIONS] * yRatio - yOffset,
         score: keypointsData[baseIdx + NUM_PREDICTIONS * 2],
       };
     }
@@ -325,6 +337,8 @@ function postProcessPoseEnd2End(
   scoreThreshold = 0.45,
   xRatio,
   yRatio,
+  xOffset = 0,
+  yOffset = 0,
 ) {
   // post process
   const NUM_PREDICTIONS = rawTensor.dims[1]; // 300
@@ -342,10 +356,10 @@ function postProcessPoseEnd2End(
     const score = predictions[offset + 4];
     if (score <= scoreThreshold) break;
 
-    const x1 = predictions[offset] * xRatio;
-    const y1 = predictions[offset + 1] * yRatio;
-    const x2 = predictions[offset + 2] * xRatio;
-    const y2 = predictions[offset + 3] * yRatio;
+    const x1 = predictions[offset] * xRatio - xOffset;
+    const y1 = predictions[offset + 1] * yRatio - yOffset;
+    const x2 = predictions[offset + 2] * xRatio - xOffset;
+    const y2 = predictions[offset + 3] * yRatio - yOffset;
 
     const w = x2 - x1;
     const h = y2 - y1;
@@ -354,8 +368,8 @@ function postProcessPoseEnd2End(
     for (let kp = 0; kp < NUM_KEYPOINTS; kp++) {
       const baseIdx = offset + NUM_BBOX_ATTRS + kp * KEYPOINT_DIMS;
       keypoints[kp] = {
-        x: predictions[baseIdx] * xRatio,
-        y: predictions[baseIdx + 1] * yRatio,
+        x: predictions[baseIdx] * xRatio - xOffset,
+        y: predictions[baseIdx + 1] * yRatio - yOffset,
         score: predictions[baseIdx + 2],
       };
     }
@@ -385,6 +399,8 @@ function postProcessSegment(
   scoreThreshold,
   xRatio,
   yRatio,
+  xOffset = 0,
+  yOffset = 0,
 ) {
   const NUM_PREDICTIONS = rawTensor.dims[2];
   const NUM_BBOX_ATTRS = 4;
@@ -423,8 +439,8 @@ function postProcessSegment(
 
     const w = bboxData[i + NUM_PREDICTIONS * 2] * xRatio;
     const h = bboxData[i + NUM_PREDICTIONS * 3] * yRatio;
-    const tlx = bboxData[i] * xRatio - 0.5 * w;
-    const tly = bboxData[i + NUM_PREDICTIONS] * yRatio - 0.5 * h;
+    const tlx = bboxData[i] * xRatio - 0.5 * w - xOffset;
+    const tly = bboxData[i + NUM_PREDICTIONS] * yRatio - 0.5 * h - yOffset;
 
     results[resultCount++] = {
       bbox: [tlx, tly, w, h],
@@ -462,6 +478,8 @@ function postProcessSegmentEnd2End(
   scoreThreshold,
   xRatio,
   yRatio,
+  xOffset = 0,
+  yOffset = 0,
 ) {
   const NUM_PREDICTIONS = rawTensor.dims[1];
   const NUM_ATTRIBUTES = rawTensor.dims[2];
@@ -486,10 +504,10 @@ function postProcessSegmentEnd2End(
     if (score <= scoreThreshold) break;
 
     const classIdx = Math.round(predictions[offset + 5]);
-    const x1 = predictions[offset] * xRatio;
-    const y1 = predictions[offset + 1] * yRatio;
-    const x2 = predictions[offset + 2] * xRatio;
-    const y2 = predictions[offset + 3] * yRatio;
+    const x1 = predictions[offset] * xRatio - xOffset;
+    const y1 = predictions[offset + 1] * yRatio - yOffset;
+    const x2 = predictions[offset + 2] * xRatio - xOffset;
+    const y2 = predictions[offset + 3] * yRatio - yOffset;
 
     const w = x2 - x1;
     const h = y2 - y1;

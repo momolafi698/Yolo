@@ -25,7 +25,7 @@ const ANGLE_NAMES = [
 ];
 
 const DEFAULT_OPTIONS = {
-  keypointThreshold: 0.25,
+  keypointThreshold: 0.20,
   maxPointDistance: 1.15,
   minComparableKeypoints: 8,
   minConfidence: 52,

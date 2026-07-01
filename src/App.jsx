@@ -115,6 +115,7 @@ function App() {
   const currentAudioRef = useRef(null);
   const audioTimeoutRef = useRef(null);
   const danceScoreRef = useRef(danceScore);
+  const playedDanceIdsRef = useRef([]);
 
   useEffect(() => {
     danceScoreRef.current = danceScore;
@@ -209,6 +210,7 @@ function App() {
     setLastDanceInfo(null);
     setPauseCountdown(0);
     setAudioTimeLeft(null);
+    playedDanceIdsRef.current = [];
   }, []);
 
   const playMusicForCamera = useCallback(() => {
@@ -232,6 +234,9 @@ function App() {
     }
 
     if (selectedDance && selectedDance.audioUrl) {
+      if (!playedDanceIdsRef.current.includes(selectedDance.id)) {
+        playedDanceIdsRef.current.push(selectedDance.id);
+      }
       const baseUrl = import.meta.env.BASE_URL || "/";
       const audioPath = `${baseUrl.replace(/\/+$/, "")}/${selectedDance.audioUrl.replace(/^\/+/, "")}`;
       const audio = new Audio(audioPath);
@@ -264,17 +269,16 @@ function App() {
             setLastDanceInfo(null);
             
             const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
-            if (dancesWithAudio.length > 0) {
-              const otherDances = dancesWithAudio.filter((d) => d.id !== selectedDance.id);
-              const nextDance = otherDances.length > 0
-                ? otherDances[Math.floor(Math.random() * otherDances.length)]
-                : selectedDance;
+            const unplayedDances = dancesWithAudio.filter((d) => !playedDanceIdsRef.current.includes(d.id));
+            if (unplayedDances.length > 0) {
+              const nextDance = unplayedDances[Math.floor(Math.random() * unplayedDances.length)];
               setSelectedDanceId(nextDance.id);
               prepareCountdown();
             } else {
               stopMusic();
               setGameState("idle");
-              setPerformanceRating({ text: "PRET", color: "text-slate-400" });
+              setPerformanceRating({ text: "TERMINE", color: "text-emerald-400 font-extrabold" });
+              setCoachComments(["Felicitations ! Vous avez complete toutes les danses de la playlist !"]);
             }
           }
         }, 1000);

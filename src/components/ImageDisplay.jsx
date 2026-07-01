@@ -80,6 +80,7 @@ const ImageDisplay = memo(function ImageDisplay({
           <div className="relative w-full max-h-[600px] flex items-center justify-center">
             <video
               className="block max-h-[600px] w-full object-contain"
+              style={activeFeature === "camera" ? { transform: "scaleX(-1)" } : undefined}
               ref={cameraRef}
               onLoadedMetadata={onCameraLoad}
               hidden={activeFeature !== "camera"}
@@ -114,7 +115,10 @@ const ImageDisplay = memo(function ImageDisplay({
               ref={overlayRef}
               hidden={activeFeature === null}
               className="absolute inset-0 w-full h-full pointer-events-none"
-              style={{ objectFit: "contain" }}
+              style={{
+                objectFit: "contain",
+                ...(activeFeature === "camera" ? { transform: "scaleX(-1)" } : {})
+              }}
             ></canvas>
           </div>
         </div>

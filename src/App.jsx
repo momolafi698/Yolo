@@ -639,7 +639,10 @@ function App() {
           setStableMatch(stabilized.stable);
 
           const displayMatch = stabilized.stable ?? instantMatch.best;
-          const precision = displayMatch ? Math.round(displayMatch.score) : 0;
+          const rawPrecision = displayMatch ? Math.round(displayMatch.score) : 0;
+          const precision = rawPrecision <= 20
+            ? rawPrecision
+            : Math.min(100, Math.round(20 + ((rawPrecision - 20) * 80) / 65));
 
           if (debugTargetOverlay) {
             const debugDanceId = selectedDance?.id ?? displayMatch?.id ?? selectedDanceId;

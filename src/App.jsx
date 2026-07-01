@@ -1021,6 +1021,42 @@ function App() {
             </div>
           </div>
 
+          <div className="card-violet">
+            <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
+              Candidats instantanes
+            </h2>
+            <div className="mt-4 flex flex-col gap-3">
+              {candidates.length === 0 ? (
+                <p className="text-sm text-slate-400">
+                  {gameState === "countdown"
+                    ? "La comparaison commence apres le compte a rebours."
+                    : "Pas encore assez de poses dans la sequence live."}
+                </p>
+              ) : (
+                candidates.map((candidate) => (
+                  <div key={candidate.id} className="flex flex-col gap-2">
+                    <div className="flex justify-between gap-3 text-sm">
+                      <span className="font-semibold text-slate-100 truncate">
+                        {candidate.title}
+                      </span>
+                      <span className="font-mono text-violet-300">
+                        {candidate.score.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="h-2 rounded-full overflow-hidden bg-[#050818]">
+                      <div
+                        className="h-full bg-violet-500 transition-all duration-300"
+                        style={{ width: `${candidate.score}%` }}
+                      ></div>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      segment {candidate.startTimestamp ?? "-"}s - {candidate.matchedSamples ?? 0} poses
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </aside>
       </main>
 

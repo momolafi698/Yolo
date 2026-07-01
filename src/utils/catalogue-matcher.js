@@ -232,7 +232,11 @@ function findBestSequence(samples, dance, config) {
   const latestStart = Math.max(0, dance.frames.at(-1).timestamp - liveDuration * 0.85);
   const startStep = Math.max(0.2, 1 / (dance.sampledFps || 10));
 
-  for (let start = 0; start <= latestStart; start += startStep) {
+  const tolerance = config.timeTolerance ?? 0.8;
+  const minStart = Math.max(0, firstLiveTimestamp - tolerance);
+  const maxStart = Math.min(latestStart, firstLiveTimestamp + tolerance);
+
+  for (let start = minStart; start <= maxStart; start += startStep) {
     for (const speedFactor of config.speedFactors) {
       const comparison = compareSequenceAtStart(
         samples,

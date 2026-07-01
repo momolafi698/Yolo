@@ -645,10 +645,18 @@ async function createSession(modelPath) {
     throw new Error(`Model does not exist: ${modelPath}`);
   }
 
-  return ort.InferenceSession.create(modelPath, {
-    executionProviders: ["cpu"],
-    graphOptimizationLevel: "all",
-  });
+  try {
+    return await ort.InferenceSession.create(modelPath, {
+      executionProviders: ["dml", "cpu"],
+      graphOptimizationLevel: "all",
+    });
+  } catch (error) {
+    console.warn(`DirectML failed, falling back to CPU: ${error.message}`);
+    return ort.InferenceSession.create(modelPath, {
+      executionProviders: ["cpu"],
+      graphOptimizationLevel: "all",
+    });
+  }
 }
 
 async function main() {

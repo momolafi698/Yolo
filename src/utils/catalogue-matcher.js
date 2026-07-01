@@ -1,3 +1,5 @@
+import { bandedDtw } from "./dtw.js";
+
 const KP = {
   leftShoulder: 5,
   rightShoulder: 6,
@@ -24,16 +26,80 @@ const ANGLE_NAMES = [
   "rightKnee",
 ];
 
+// Per-joint tolerance tiers. Core joints (hips/shoulders) anchor the pose and
+// get a tight tolerance; extremities (wrists/ankles, plus the face points we
+// don't otherwise score) are naturally noisier - both in real dancers'
+// precision and in pose-estimation confidence - so they get more room.
+const JOINT_TIER = {
+  leftShoulder: "core",
+  rightShoulder: "core",
+  leftHip: "core",
+  rightHip: "core",
+  leftElbow: "mid",
+  rightElbow: "mid",
+  leftKnee: "mid",
+  rightKnee: "mid",
+  leftWrist: "extremity",
+  rightWrist: "extremity",
+  leftAnkle: "extremity",
+  rightAnkle: "extremity",
+  nose: "extremity",
+  leftEye: "extremity",
+  rightEye: "extremity",
+  leftEar: "extremity",
+  rightEar: "extremity",
+};
+
+const ANGLE_JOINT_TIER = {
+  leftShoulder: "core",
+  rightShoulder: "core",
+  leftHip: "core",
+  rightHip: "core",
+  leftElbow: "mid",
+  rightElbow: "mid",
+  leftKnee: "mid",
+  rightKnee: "mid",
+};
+
 const DEFAULT_OPTIONS = {
   keypointThreshold: 0.20,
-  maxPointDistance: 2.2,
   minComparableKeypoints: 8,
-  minConfidence: 52,
+  minConfidence: 55,
   minSequenceSamples: 8,
   sequenceWindowSeconds: 3,
-  maxTimeGapSeconds: 0.22,
-  speedFactors: [0.85, 1, 1.15],
+  // Time-based coverage gate: what fraction of the live window must be
+  // backed by informative (enough visible keypoints) comparisons.
+  minCoverageFraction: 0.6,
+  // Score-point gap required over the second-best dance candidate. Only
+  // meaningful when more than one dance is being compared at once (the
+  // video-mode fallback path) - a single pre-selected dance has no "other
+  // candidate" to be confused with.
+  minMargin: 6,
+  // Local time-warping room around the audio-clock anchor, in seconds, for
+  // the single-dance/audio-synced path. This is the direct replacement for
+  // the old rigid +/-0.22s nearest-frame snap with no warping at all.
+  syncBandSeconds: 0.5,
+  // Local time-warping room per coarse-scanned start candidate, for the
+  // fallback multi-dance search (no dance pre-selected / no audio clock).
+  fallbackBandSeconds: 0.35,
+  fallbackAnchorStepSeconds: 0.3,
+  fallbackTimeTolerance: 2.0,
+  // Small extra cost for non-diagonal (insertion/deletion) DTW steps, to
+  // discourage degenerate long runs while still allowing genuine local
+  // tempo variation within the band.
+  stepPenalty: 0.02,
+  keypointSigma: { core: 0.12, mid: 0.16, extremity: 0.22 },
+  angleSigma: { core: 18, mid: 24 },
 };
+
+function mergeConfig(options) {
+  return {
+    ...DEFAULT_OPTIONS,
+    ...options,
+    keypointSigma: { ...DEFAULT_OPTIONS.keypointSigma, ...(options.keypointSigma ?? {}) },
+    angleSigma: { ...DEFAULT_OPTIONS.angleSigma, ...(options.angleSigma ?? {}) },
+  };
+}
 
 export async function loadPoseCatalogue(baseUrl = "/") {
   const root = joinUrl(baseUrl, "catalogue/poses");
@@ -52,7 +118,7 @@ export async function loadPoseCatalogue(baseUrl = "/") {
 }
 
 export function matchPoseToCatalogue(pose, catalogue, options = {}) {
-  const config = { ...DEFAULT_OPTIONS, ...options };
+  const config = mergeConfig(options);
   if (!pose?.keypoints || !catalogue?.dances?.length) {
     return emptyMatch();
   }
@@ -114,7 +180,7 @@ function swapLeftRightKeypoints(keypoints) {
 }
 
 export function createPoseSample(pose, timestamp, options = {}) {
-  const config = { ...DEFAULT_OPTIONS, ...options };
+  const config = mergeConfig(options);
   if (!pose?.keypoints) return null;
 
   let keypoints = pose.keypoints;
@@ -133,7 +199,7 @@ export function createPoseSample(pose, timestamp, options = {}) {
 }
 
 export function matchPoseSequenceToCatalogue(samples, catalogue, options = {}) {
-  const config = { ...DEFAULT_OPTIONS, ...options };
+  const config = mergeConfig(options);
   const usableSamples = samples.filter((sample) => sample?.keypoints?.length);
 
   if (
@@ -150,11 +216,19 @@ export function matchPoseSequenceToCatalogue(samples, catalogue, options = {}) {
   const best = candidates[0] ?? null;
   const second = candidates[1] ?? null;
   const margin = best && second ? best.score - second.score : best?.score ?? 0;
+  const singleCandidate = candidates.length <= 1;
+
+  const detected = Boolean(
+    best &&
+    best.score >= config.minConfidence &&
+    best.informativeCoverageFraction >= config.minCoverageFraction &&
+    (singleCandidate || margin >= config.minMargin),
+  );
 
   return {
     best,
     candidates,
-    detected: Boolean(best && best.score >= config.minConfidence),
+    detected,
     margin,
   };
 }
@@ -162,7 +236,11 @@ export function matchPoseSequenceToCatalogue(samples, catalogue, options = {}) {
 export function stabilizeMatches(history, currentMatch, now, windowMs = 2200) {
   const nextHistory = history
     .filter((entry) => now - entry.time <= windowMs)
-    .concat(currentMatch?.best ? [{ time: now, match: currentMatch.best }] : []);
+    .concat(
+      currentMatch?.detected && currentMatch?.best
+        ? [{ time: now, match: currentMatch.best }]
+        : [],
+    );
 
   const grouped = new Map();
   for (const entry of nextHistory) {
@@ -191,7 +269,11 @@ export function stabilizeMatches(history, currentMatch, now, windowMs = 2200) {
   };
 }
 
-function prepareDance(entry) {
+// Turns raw extracted-pose JSON for one dance into the in-memory shape the
+// matcher operates on. Pure/fetch-independent so it can be shared between
+// the browser catalogue loader above and offline node tooling (e.g. an
+// evaluation/calibration script) that reads the same JSON files from disk.
+export function prepareDance(entry) {
   const frames = entry.data.frames
     .filter((frame) => {
       if (!frame.person) return false;
@@ -249,160 +331,183 @@ function findBestFrame(live, dance, config) {
   return best;
 }
 
-function findBestSequence(samples, dance, config) {
-  let best = {
+function emptySequenceResult(dance) {
+  return {
     id: dance.id,
     title: dance.title,
     score: 0,
-    startTimestamp: null,
-    endTimestamp: null,
-    speedFactor: 1,
     matchedSamples: 0,
     keypointScore: 0,
-    angleScore: 0,
+    angleScore: null,
+    coverageSeconds: 0,
+    informativeCoverageFraction: 0,
+    alignedFrameIndex: null,
+    alignedTimestamp: null,
   };
+}
 
-  if (!dance.frames.length) return best;
+function findBestSequence(samples, dance, config) {
+  if (!dance.frames.length || samples.length === 0) {
+    return emptySequenceResult(dance);
+  }
 
+  if (config.syncToTimeline) {
+    return alignSyncedSequence(samples, dance, config);
+  }
+
+  return alignFallbackSequence(samples, dance, config);
+}
+
+// Primary path: a single dance has already been selected and the audio (or
+// video) element's clock tells us, for every live sample's timestamp,
+// approximately which reference frame it should correspond to. We still run
+// a small banded DTW rather than a rigid nearest-frame lookup, because real
+// dancers have reaction lag and micro-tempo drift relative to the track -
+// the band is exactly the "temporal room" that was previously nonexistent.
+function alignSyncedSequence(samples, dance, config) {
+  const sampledFps = dance.sampledFps || 30;
+  const bandFrames = Math.max(1, Math.round(config.syncBandSeconds * sampledFps));
+  const anchorForRow = (i) => nearestFrameIndex(dance.frames, samples[i].timestamp);
+
+  return runAlignment(samples, dance, config, anchorForRow, bandFrames);
+}
+
+// Fallback path: no dance has been pre-selected (video mode without a
+// manual selection), so we don't know where in the reference timeline - or
+// even which dance - the live sequence corresponds to. Coarsely scan
+// candidate start offsets (replacing the old offset x speedFactor sweep),
+// and run a banded DTW around each candidate to absorb local tempo
+// variation instead of only 3 discrete global speeds.
+function alignFallbackSequence(samples, dance, config) {
+  const sampledFps = dance.sampledFps || 30;
+  const bandFrames = Math.max(1, Math.round(config.fallbackBandSeconds * sampledFps));
   const firstLiveTimestamp = samples[0].timestamp;
   const liveDuration = samples.at(-1).timestamp - firstLiveTimestamp;
 
-  if (config.syncToTimeline) {
-    const comparison = compareSequenceAtStart(
-      samples,
-      dance,
-      firstLiveTimestamp,
-      firstLiveTimestamp,
-      1,
-      config,
-    );
-
-    return {
-      id: dance.id,
-      title: dance.title,
-      startTimestamp: round(firstLiveTimestamp, 2),
-      endTimestamp: round(samples.at(-1).timestamp, 2),
-      speedFactor: 1,
-      ...comparison,
-    };
-  }
-
   const latestStart = Math.max(0, dance.frames.at(-1).timestamp - liveDuration * 0.85);
-  const startStep = Math.max(0.2, 1 / (dance.sampledFps || 10));
-
-  const tolerance = config.timeTolerance ?? 2.0;
+  const tolerance = config.fallbackTimeTolerance;
   const minStart = Math.max(0, firstLiveTimestamp - tolerance);
   const maxStart = Math.min(latestStart, firstLiveTimestamp + tolerance);
+  const step = Math.max(config.fallbackAnchorStepSeconds, 1 / sampledFps);
 
-  for (let start = minStart; start <= maxStart; start += startStep) {
-    for (const speedFactor of config.speedFactors) {
-      const comparison = compareSequenceAtStart(
-        samples,
-        dance,
-        start,
-        firstLiveTimestamp,
-        speedFactor,
-        config,
-      );
-
-      if (comparison.score > best.score) {
-        best = {
-          id: dance.id,
-          title: dance.title,
-          startTimestamp: round(start, 2),
-          endTimestamp: round(start + liveDuration * speedFactor, 2),
-          speedFactor,
-          ...comparison,
-        };
-      }
-    }
+  let best = null;
+  for (let start = minStart; start <= maxStart; start += step) {
+    const anchorForRow = (i) => nearestFrameIndex(
+      dance.frames,
+      start + (samples[i].timestamp - firstLiveTimestamp),
+    );
+    const result = runAlignment(samples, dance, config, anchorForRow, bandFrames);
+    if (!best || result.score > best.score) best = result;
   }
 
-  return best;
+  return best ?? emptySequenceResult(dance);
 }
 
-function compareSequenceAtStart(samples, dance, start, firstLiveTimestamp, speedFactor, config) {
+// Shared alignment core: runs the banded DTW for one dance against one
+// anchor line, then aggregates score/coverage from the resulting path.
+function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
+  const frames = dance.frames;
+  const cellCache = new Map();
+
+  const cost = (i, j) => {
+    const comparison = compareFrame(samples[i], frames[j], config);
+    cellCache.set(i * frames.length + j, comparison);
+    return 1 - comparison.score / 100;
+  };
+
+  const alignment = bandedDtw({
+    n: samples.length,
+    m: frames.length,
+    cost,
+    anchorForRow,
+    bandRadius: bandFrames,
+    stepPenalty: config.stepPenalty,
+  });
+
+  if (!alignment.path.length) return emptySequenceResult(dance);
+
+  // Collapse the path to one comparison per live sample (a live sample can
+  // appear multiple times when the path takes a horizontal - reference
+  // advances faster than the dancer - step; keep the last, which is what
+  // the alignment settled on).
+  const rowResult = new Map();
+  for (const [i, j] of alignment.path) {
+    rowResult.set(i, cellCache.get(i * frames.length + j));
+  }
+
   let scoreSum = 0;
   let keypointScoreSum = 0;
   let angleScoreSum = 0;
   let angleScoreCount = 0;
-  let matchedSamples = 0;
+  let informativeRows = 0;
 
-  for (const sample of samples) {
-    const targetTimestamp = start + (sample.timestamp - firstLiveTimestamp) * speedFactor;
-    const referenceFrame = findNearestFrame(dance.frames, targetTimestamp);
-    if (
-      !referenceFrame ||
-      Math.abs(referenceFrame.timestamp - targetTimestamp) > config.maxTimeGapSeconds
-    ) {
-      continue;
-    }
-
-    const comparison = compareFrame(sample, referenceFrame, config);
-    if (comparison.comparableKeypoints < config.minComparableKeypoints) {
-      continue;
-    }
-
+  for (const comparison of rowResult.values()) {
+    if (!comparison?.informative) continue;
+    informativeRows += 1;
     scoreSum += comparison.score;
     keypointScoreSum += comparison.keypointScore;
     if (comparison.angleScore !== null) {
       angleScoreSum += comparison.angleScore;
       angleScoreCount += 1;
     }
-    matchedSamples += 1;
   }
 
-  if (matchedSamples < config.minSequenceSamples) {
-    return {
-      score: 0,
-      matchedSamples,
-      keypointScore: 0,
-      angleScore: null,
-    };
-  }
+  if (informativeRows === 0) return emptySequenceResult(dance);
 
-  const coverage = matchedSamples / samples.length;
-  const coveragePenalty = Math.min(1, coverage / 0.75);
+  const totalDuration = samples.at(-1).timestamp - samples[0].timestamp;
+  const informativeCoverageFraction = informativeRows / samples.length;
+  const coverageSeconds = totalDuration > 0
+    ? informativeCoverageFraction * totalDuration
+    : 0;
+
+  const [, lastJ] = alignment.path.at(-1);
+  const alignedFrame = frames[lastJ] ?? null;
+
   return {
-    score: round((scoreSum / matchedSamples) * coveragePenalty, 1),
-    matchedSamples,
-    keypointScore: round(keypointScoreSum / matchedSamples, 1),
+    id: dance.id,
+    title: dance.title,
+    score: round(scoreSum / informativeRows, 1),
+    matchedSamples: informativeRows,
+    keypointScore: round(keypointScoreSum / informativeRows, 1),
     angleScore: angleScoreCount > 0 ? round(angleScoreSum / angleScoreCount, 1) : null,
+    coverageSeconds: round(coverageSeconds, 2),
+    informativeCoverageFraction: round(informativeCoverageFraction, 3),
+    alignedFrameIndex: alignedFrame?.frameIndex ?? null,
+    alignedTimestamp: alignedFrame?.timestamp ?? null,
   };
 }
 
-function findNearestFrame(frames, timestamp) {
+// Binary search for the reference frame whose timestamp is closest to the
+// given timestamp; used to center the DTW band on a per-row anchor.
+function nearestFrameIndex(frames, timestamp) {
   let low = 0;
   let high = frames.length - 1;
 
   while (low <= high) {
-    const mid = Math.floor((low + high) / 2);
-    if (frames[mid].timestamp < timestamp) {
-      low = mid + 1;
-    } else {
-      high = mid - 1;
-    }
+    const mid = (low + high) >> 1;
+    if (frames[mid].timestamp < timestamp) low = mid + 1;
+    else high = mid - 1;
   }
 
-  const previous = frames[high];
-  const next = frames[low];
-  if (!previous) return next ?? null;
-  if (!next) return previous;
-  return Math.abs(previous.timestamp - timestamp) <= Math.abs(next.timestamp - timestamp)
-    ? previous
-    : next;
+  if (high < 0) return 0;
+  if (low >= frames.length) return frames.length - 1;
+  return Math.abs(frames[high].timestamp - timestamp) <= Math.abs(frames[low].timestamp - timestamp)
+    ? high
+    : low;
 }
 
 function compareFrame(live, frame, config) {
   const pointComparison = compareKeypoints(live.keypoints, frame.keypoints, config);
-  const angleScore = compareAngles(live.angles, frame.angles);
+  const angleScore = compareAngles(live.angles, frame.angles, config);
+  const informative = pointComparison.count >= config.minComparableKeypoints;
 
-  if (pointComparison.count < config.minComparableKeypoints) {
+  if (!informative) {
     return {
       score: 0,
-      keypointScore: pointComparison.score,
-      angleScore,
+      keypointScore: round(pointComparison.score, 1),
+      angleScore: angleScore === null ? null : round(angleScore, 1),
       comparableKeypoints: pointComparison.count,
+      informative: false,
     };
   }
 
@@ -415,11 +520,18 @@ function compareFrame(live, frame, config) {
     keypointScore: round(pointComparison.score, 1),
     angleScore: angleScore === null ? null : round(angleScore, 1),
     comparableKeypoints: pointComparison.count,
+    informative: true,
   };
 }
 
+// Per-joint Gaussian falloff, applied before aggregating. This replaces the
+// old approach of pooling every joint into one average distance and
+// applying a single linear threshold to that scalar - which made it
+// impossible to give core joints tighter tolerance than extremities, and
+// meant fixing false negatives required uniformly loosening every joint at
+// once (exactly the tuning churn this rework replaces).
 function compareKeypoints(live, reference, config) {
-  let weightedDistance = 0;
+  let weightedScore = 0;
   let totalWeight = 0;
   let count = 0;
 
@@ -430,8 +542,13 @@ function compareKeypoints(live, reference, config) {
       continue;
     }
 
+    const tier = JOINT_TIER[a.name] ?? "mid";
+    const sigma = config.keypointSigma[tier];
+    const d = Math.hypot(a.x - b.x, a.y - b.y);
+    const pointScore = 100 * Math.exp(-(d * d) / (2 * sigma * sigma));
+
     const weight = (a.score + b.score) / 2;
-    weightedDistance += Math.hypot(a.x - b.x, a.y - b.y) * weight;
+    weightedScore += pointScore * weight;
     totalWeight += weight;
     count += 1;
   }
@@ -440,13 +557,11 @@ function compareKeypoints(live, reference, config) {
     return { score: 0, count: 0 };
   }
 
-  const averageDistance = weightedDistance / totalWeight;
-  const score = Math.max(0, 100 * (1 - averageDistance / config.maxPointDistance));
-  return { score, count };
+  return { score: weightedScore / totalWeight, count };
 }
 
-function compareAngles(liveAngles, referenceAngles) {
-  let diffSum = 0;
+function compareAngles(liveAngles, referenceAngles, config) {
+  let scoreSum = 0;
   let count = 0;
 
   for (const name of ANGLE_NAMES) {
@@ -455,7 +570,11 @@ function compareAngles(liveAngles, referenceAngles) {
     if (live === null || live === undefined || reference === null || reference === undefined) {
       continue;
     }
-    diffSum += Math.abs(live - reference);
+
+    const tier = ANGLE_JOINT_TIER[name] ?? "mid";
+    const sigma = config.angleSigma[tier];
+    const diff = Math.abs(live - reference);
+    scoreSum += 100 * Math.exp(-(diff * diff) / (2 * sigma * sigma));
     count += 1;
   }
 
@@ -463,8 +582,7 @@ function compareAngles(liveAngles, referenceAngles) {
     return null;
   }
 
-  const averageDiff = diffSum / count;
-  return Math.max(0, 100 * (1 - averageDiff / 130));
+  return scoreSum / count;
 }
 
 const MIN_NORM_SCALE = 15;

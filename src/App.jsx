@@ -40,7 +40,6 @@ const DEFAULT_MODEL_CONFIG = {
 const COUNTDOWN_SECONDS = 5;
 const SEQUENCE_WINDOW_SECONDS = 4;
 const AUDIO_SYNC_OFFSET_SECONDS = 0;
-const CATALOGUE_SYNC_FPS = 30;
 const DEBUG_TARGET_COLORS = {
   bboxColor: "rgba(34, 211, 238, 0.95)",
   labelBackground: "rgba(8, 145, 178, 0.85)",
@@ -151,26 +150,17 @@ function getPoseProjectionAnchor(pose) {
 function createDebugTargetPrediction(
   dance,
   match,
-  liveSequence,
   detectedPose,
   elapsedSeconds,
   canvas,
-  options = {},
 ) {
   if (!dance?.frames?.length || !detectedPose?.keypoints || !canvas) return null;
 
-  const firstLiveTimestamp = liveSequence?.[0]?.timestamp ?? elapsedSeconds;
-  const targetTimestamp = options.syncToTimeline
-    ? elapsedSeconds
-    : (
-      match?.startTimestamp !== null && match?.startTimestamp !== undefined
-        ? match.startTimestamp + (elapsedSeconds - firstLiveTimestamp) * (match.speedFactor ?? 1)
-        : elapsedSeconds
-    );
-  const syncFps = dance.sampledFps || CATALOGUE_SYNC_FPS;
-  const targetFrameIndex = options.syncToTimeline
-    ? Math.round(Math.max(0, targetTimestamp) * syncFps)
-    : null;
+  // alignedTimestamp/alignedFrameIndex come straight from the DTW path's
+  // last aligned step - i.e. what the matcher actually locked onto for the
+  // most recent live sample, rather than a naive elapsed-time projection.
+  const targetTimestamp = match?.alignedTimestamp ?? elapsedSeconds;
+  const targetFrameIndex = match?.alignedFrameIndex ?? null;
   const frame = findNearestCatalogueFrame(
     dance.frames,
     Math.max(0, targetTimestamp),
@@ -618,8 +608,6 @@ function App() {
           };
           if (isTimelineSynced) {
             matchOptions.syncToTimeline = true;
-            matchOptions.speedFactors = [1];
-            matchOptions.maxTimeGapSeconds = 0.22;
           }
 
           const instantMatch = matchPoseSequenceToCatalogue(
@@ -638,20 +626,21 @@ function App() {
           setCurrentMatch(instantMatch);
           setStableMatch(stabilized.stable);
 
-          const displayMatch = stabilized.stable ?? instantMatch.best;
+          // Only ever surface a confirmed (gated) match to the score/UI - a
+          // sub-threshold guess is deliberately not shown, so the displayed
+          // precision reflects confident detections only.
+          const displayMatch = stabilized.stable ?? (instantMatch.detected ? instantMatch.best : null);
           const precision = displayMatch ? Math.round(displayMatch.score) : 0;
 
           if (debugTargetOverlay) {
-            const debugDanceId = selectedDance?.id ?? displayMatch?.id ?? selectedDanceId;
+            const debugDanceId = selectedDance?.id ?? instantMatch.best?.id ?? selectedDanceId;
             const debugDance = catalogue.dances.find((dance) => dance.id === debugDanceId);
             const debugPrediction = createDebugTargetPrediction(
               debugDance,
-              displayMatch,
-              liveSequenceRef.current,
+              instantMatch.best,
               targetPose,
               elapsedSeconds,
               overlayCtx.canvas,
-              { syncToTimeline: isTimelineSynced },
             );
 
             if (debugPrediction) {
@@ -670,8 +659,6 @@ function App() {
 
           if (displayMatch) {
             sessionPrecisionsRef.current.push(precision);
-          } else {
-            sessionPrecisionsRef.current.push(0);
           }
 
           const runningAvg = sessionPrecisionsRef.current.length > 0
@@ -1035,7 +1022,7 @@ function App() {
   const imageLoad = useCallback(() => {}, []);
 
   const instantCandidates = (currentMatch?.candidates ?? []).slice(0, 2);
-  const shownMatch = stableMatch ?? currentMatch.best;
+  const shownMatch = stableMatch ?? (currentMatch.detected ? currentMatch.best : null);
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 text-white min-h-screen flex flex-col gap-6">
@@ -1417,7 +1404,7 @@ function App() {
                       ></div>
                     </div>
                     <p className="text-xs text-slate-500">
-                      segment {candidate.startTimestamp ?? "-"}s - {candidate.matchedSamples ?? 0} poses
+                      aligne a {candidate.alignedTimestamp ?? "-"}s - {candidate.matchedSamples ?? 0} poses
                     </p>
                   </div>
                 ))

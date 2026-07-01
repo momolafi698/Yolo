@@ -115,10 +115,7 @@ const ImageDisplay = memo(function ImageDisplay({
               ref={overlayRef}
               hidden={activeFeature === null}
               className="absolute inset-0 w-full h-full pointer-events-none"
-              style={{
-                objectFit: "contain",
-                ...(activeFeature === "camera" ? { transform: "scaleX(-1)" } : {})
-              }}
+              style={{ objectFit: "contain" }}
             ></canvas>
           </div>
         </div>

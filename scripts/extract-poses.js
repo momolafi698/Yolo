@@ -37,7 +37,7 @@ const KP = Object.fromEntries(KEYPOINT_NAMES.map((name, index) => [name, index])
 const DEFAULTS = {
   input: "videos",
   output: "public/catalogue/poses",
-  model: "public/models/yolo26s-pose.onnx",
+  model: "public/models/yolo26n-pose.onnx",
   fps: 10,
   imageSize: 640,
   scoreThreshold: 0.35,
@@ -58,7 +58,7 @@ Usage:
 Options:
   --input <path>       Video file or directory. Default: ${DEFAULTS.input}
   --output <dir>       Output catalogue directory. Default: ${DEFAULTS.output}
-  --model              Removed. Pose extraction always uses YOLO26-s.
+  --model              Removed. Pose extraction always uses YOLO26-n.
   --fps <number>       Sampling FPS. Default: ${DEFAULTS.fps}
   --size <number>      Model input square size. Default: ${DEFAULTS.imageSize}
   --score <number>     Person confidence threshold. Default: ${DEFAULTS.scoreThreshold}
@@ -92,7 +92,7 @@ function parseArgs(argv) {
         break;
       case "--model":
       case "-m":
-        throw new Error("Model selection was removed; pose extraction always uses YOLO26-s.");
+        throw new Error("Model selection was removed; pose extraction always uses YOLO26-n.");
       case "--fps":
         options.fps = Number(readValue());
         break;

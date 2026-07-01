@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "createdAt": "2026-06-30T15:56:34.044Z",
+  "createdAt": "2026-07-01T06:34:43.681Z",
   "outputDirectory": "public/catalogue/poses",
   "dances": [
     {
@@ -8,19 +8,19 @@
       "title": "cortis-redred",
       "file": "cortis-redred.poses.json",
       "source": "videos/cortis-redred.mp4",
-      "sampledFps": 30,
-      "detectedFrames": 4851,
-      "sampledFrames": 4987,
-      "detectionRate": 0.9727
+      "sampledFps": 10,
+      "detectedFrames": 1616,
+      "sampledFrames": 1662,
+      "detectionRate": 0.9723
     },
     {
       "id": "killit-karisma",
       "title": "killit-karisma",
       "file": "killit-karisma.poses.json",
       "source": "videos/killit-karisma.mp4",
-      "sampledFps": 30,
-      "detectedFrames": 630,
-      "sampledFrames": 630,
+      "sampledFps": 10,
+      "detectedFrames": 210,
+      "sampledFrames": 210,
       "detectionRate": 1
     },
     {
@@ -28,10 +28,10 @@
       "title": "redred-karisma",
       "file": "redred-karisma.poses.json",
       "source": "videos/redred-karisma.mp4",
-      "sampledFps": 30,
-      "detectedFrames": 680,
-      "sampledFrames": 680,
-      "detectionRate": 1
+      "sampledFps": 10,
+      "detectedFrames": 226,
+      "sampledFrames": 227,
+      "detectionRate": 0.9956
     }
   ]
 }

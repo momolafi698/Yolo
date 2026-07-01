@@ -22,7 +22,7 @@ const DEFAULT_MODEL_CONFIG = {
   overlaySize: [640, 640],
   iouThreshold: 0.35,
   scoreThreshold: 0.45,
-  backend: "wasm",
+  backend: "webgpu",
   numThreads: 1,
   enableNMS: false,
   model: "yolo26n",

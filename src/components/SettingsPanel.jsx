@@ -63,7 +63,7 @@ const SettingsPanel = memo(function SettingsPanel({
             <div className="flex flex-col sm:col-span-2">
               <label className={labelClass}>Model</label>
               <div className={`${inputClass} text-slate-300`}>
-                YOLO26-s
+                YOLO26-n
               </div>
             </div>
 
@@ -128,7 +128,7 @@ const SettingsPanel = memo(function SettingsPanel({
             <div className="flex flex-col">
               <label className={labelClass}>Backend</label>
               <select
-                defaultValue={defaultModelConfig?.backend ?? "wasm"}
+                defaultValue={defaultModelConfig?.backend ?? "webgpu"}
                 onChange={(e) => {
                   modelConfigRef.current.backend = e.target.value;
                   loadModel();

@@ -6,7 +6,7 @@
 <br>
 
 [![ONNX Runtime Web](https://img.shields.io/badge/ONNX%20Runtime-Web-blue)](https://onnxruntime.ai/)
-[![YOLO](https://img.shields.io/badge/YOLO-26s-green)](https://github.com/ultralytics/ultralytics)
+[![YOLO](https://img.shields.io/badge/YOLO-26n-green)](https://github.com/ultralytics/ultralytics)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 </div>
@@ -45,7 +45,7 @@ To achieve the best performance using **WebGPU**, please ensure the following:
 
 ## 📊 Model
 
-This project is fixed to **YOLO26-s**. The browser app and catalogue extractor both load YOLO26-s ONNX files from `public/models/`.
+This project is fixed to **YOLO26-n**. The browser app and catalogue extractor both load YOLO26-n ONNX files from `public/models/`.
 
 _The model is licensed under [AGPL-3.0](./public/models/LICENSE.txt) via [Ultralytics](https://github.com/ultralytics/ultralytics)._
 

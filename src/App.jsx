@@ -226,6 +226,8 @@ function App() {
       if (dancesWithAudio.length > 0) {
         const randomIndex = Math.floor(Math.random() * dancesWithAudio.length);
         selectedDance = dancesWithAudio[randomIndex];
+        setSelectedDanceId(selectedDance.id);
+        return;
       }
     }
 
@@ -390,9 +392,13 @@ function App() {
             setSequenceSampleCount(liveSequenceRef.current.length);
           }
 
+          const activeCatalogue = selectedDanceId
+            ? { ...catalogue, dances: catalogue.dances.filter((d) => d.id === selectedDanceId) }
+            : catalogue;
+
           const instantMatch = matchPoseSequenceToCatalogue(
             liveSequenceRef.current,
-            catalogue,
+            activeCatalogue,
             {
               sequenceWindowSeconds: SEQUENCE_WINDOW_SECONDS,
             },
@@ -461,7 +467,7 @@ function App() {
         isProcessingRef.current = false;
       }
     },
-    [catalogue, countdown, prepareCountdown, pushCoachComment],
+    [catalogue, countdown, prepareCountdown, pushCoachComment, selectedDanceId],
   );
 
   const handleModelLoaded = useCallback((data) => {

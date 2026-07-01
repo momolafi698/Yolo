@@ -1,8 +1,19 @@
 {
   "schemaVersion": 1,
-  "createdAt": "2026-07-01T12:54:26.975Z",
+  "createdAt": "2026-07-01T13:27:55.109Z",
   "outputDirectory": "public/catalogue/poses",
   "dances": [
+    {
+      "id": "mirrored-whiplash-dance-cover-ft-lewkin-b8wqpkjrfqk",
+      "title": "[mirrored] whiplash dance cover ft. lewkin 🤍 [B8wqpkjRfQk]",
+      "file": "mirrored-whiplash-dance-cover-ft-lewkin-b8wqpkjrfqk.poses.json",
+      "source": "videos/[mirrored] whiplash dance cover ft. lewkin 🤍 [B8wqpkjRfQk].mp4",
+      "audioUrl": "/audio/mirrored-whiplash-dance-cover-ft-lewkin-b8wqpkjrfqk.mp3",
+      "sampledFps": 10,
+      "detectedFrames": 176,
+      "sampledFrames": 176,
+      "detectionRate": 1
+    },
     {
       "id": "cortis-fashion-mirrored-dance-cover-cortis-fashion-tavbf5y8e2i",
       "title": "Cortis - ‘FaSHioN’ Mirrored Dance Cover ｜ #cortis_fashion [TaVbf5y8E2I]",
@@ -67,17 +78,6 @@
       "sampledFps": 10,
       "detectedFrames": 96,
       "sampledFrames": 96,
-      "detectionRate": 1
-    },
-    {
-      "id": "mirrored-whiplash-dance-cover-ft-lewkin-b8wqpkjrfqk",
-      "title": "[mirrored] whiplash dance cover ft. lewkin 🤍 [B8wqpkjRfQk]",
-      "file": "mirrored-whiplash-dance-cover-ft-lewkin-b8wqpkjrfqk.poses.json",
-      "source": "videos/[mirrored] whiplash dance cover ft. lewkin 🤍 [B8wqpkjRfQk].mp4",
-      "audioUrl": "/audio/mirrored-whiplash-dance-cover-ft-lewkin-b8wqpkjrfqk.mp3",
-      "sampledFps": 10,
-      "detectedFrames": 176,
-      "sampledFrames": 176,
       "detectionRate": 1
     }
   ]

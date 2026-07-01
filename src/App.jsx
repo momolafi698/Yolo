@@ -88,6 +88,7 @@ function App() {
   const [lastDanceInfo, setLastDanceInfo] = useState(null);
   const [pauseCountdown, setPauseCountdown] = useState(0);
   const [audioTimeLeft, setAudioTimeLeft] = useState(null);
+  const [scoreHistory, setScoreHistory] = useState([]);
   const [performanceRating, setPerformanceRating] = useState({
     text: "PRET",
     color: "text-slate-400",
@@ -255,6 +256,25 @@ function App() {
 
       audio.addEventListener("ended", () => {
         const finalScore = danceScoreRef.current;
+        const finalSampleCount = liveSequenceRef.current.length;
+        
+        let rank = "D";
+        if (finalScore >= 3000) rank = "S";
+        else if (finalScore >= 1500) rank = "A";
+        else if (finalScore >= 800) rank = "B";
+        else if (finalScore >= 300) rank = "C";
+
+        const historyEntry = {
+          id: Date.now(),
+          title: selectedDance.title,
+          score: finalScore,
+          rank: rank,
+          samples: finalSampleCount,
+          date: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        };
+
+        setScoreHistory((prev) => [historyEntry, ...prev]);
+
         setLastDanceInfo({
           title: selectedDance.title,
           score: finalScore,
@@ -951,6 +971,79 @@ function App() {
             <p className="text-xs text-slate-400 truncate">
               Source video : {videoName || "video locale"}
             </p>
+          )}
+        </div>
+
+        <div className="card-violet flex flex-col gap-3">
+          <div className="flex items-center justify-between border-b border-violet-500/20 pb-2">
+            <h2 className="text-lg font-bold text-violet-300">
+              Historique des Scores
+            </h2>
+            {scoreHistory.length > 0 && (
+              <button
+                onClick={() => setScoreHistory([])}
+                className="text-xs text-red-400 hover:text-red-300 transition-colors font-semibold uppercase tracking-wider cursor-pointer"
+              >
+                Effacer
+              </button>
+            )}
+          </div>
+          
+          {scoreHistory.length === 0 ? (
+            <p className="text-sm text-slate-400 text-center py-4 italic">
+              Aucun score enregistré pour le moment. Complétez une danse pour commencer !
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2.5 max-h-[280px] overflow-y-auto pr-1">
+              {scoreHistory.map((entry) => {
+                let rankColor = "text-slate-400";
+                let rankBg = "bg-slate-500/10 border-slate-500/20";
+                if (entry.rank === "S") {
+                  rankColor = "text-cyan-300 font-extrabold text-violet-neon";
+                  rankBg = "bg-cyan-950/20 border-cyan-500/30";
+                } else if (entry.rank === "A") {
+                  rankColor = "text-emerald-400 font-extrabold";
+                  rankBg = "bg-emerald-950/20 border-emerald-500/30";
+                } else if (entry.rank === "B") {
+                  rankColor = "text-amber-300 font-bold";
+                  rankBg = "bg-amber-950/10 border-amber-500/25";
+                } else if (entry.rank === "C") {
+                  rankColor = "text-violet-300 font-semibold";
+                  rankBg = "bg-violet-950/10 border-violet-500/20";
+                }
+
+                return (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between gap-4 bg-[#050818]/60 border border-violet-500/10 rounded-xl p-3 hover:border-violet-500/30 transition-all duration-200"
+                  >
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <span className="font-semibold text-slate-100 truncate text-sm">
+                        {entry.title}
+                      </span>
+                      <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
+                        <span>⏱️ {entry.date}</span>
+                        <span>•</span>
+                        <span>🕺 {entry.samples} séquences</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 shrink-0">
+                      <div className="flex flex-col items-end">
+                        <span className="text-xs text-slate-400 uppercase font-bold">Score</span>
+                        <span className="text-lg font-black text-violet-300 font-mono">
+                          {entry.score}
+                        </span>
+                      </div>
+                      
+                      <div className={`w-10 h-10 rounded-lg border flex items-center justify-center text-lg font-black ${rankBg} ${rankColor}`}>
+                        {entry.rank}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </div>

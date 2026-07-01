@@ -52,6 +52,9 @@ function getHighestScorePose(results) {
   }, results[0]);
 }
 
+let mirrorCanvas = null;
+let mirrorCtx = null;
+
 function App() {
   const [processingStatus, setProcessingStatus] = useState({
     warnUpTime: 0,
@@ -556,11 +559,31 @@ function App() {
       const inferW = Math.round(vw * scale);
       const inferH = Math.round(vh * scale);
 
-      const bitmap = await createImageBitmap(mediaElement, {
-        resizeWidth: inferW,
-        resizeHeight: inferH,
-        resizeQuality: "low",
-      });
+      let bitmap;
+      if (activeFeatureRef.current === "camera") {
+        if (!mirrorCanvas) {
+          mirrorCanvas = document.createElement("canvas");
+          mirrorCtx = mirrorCanvas.getContext("2d");
+        }
+        if (mirrorCanvas.width !== inferW || mirrorCanvas.height !== inferH) {
+          mirrorCanvas.width = inferW;
+          mirrorCanvas.height = inferH;
+        }
+        mirrorCtx.clearRect(0, 0, inferW, inferH);
+        mirrorCtx.save();
+        mirrorCtx.translate(inferW, 0);
+        mirrorCtx.scale(-1, 1);
+        mirrorCtx.drawImage(mediaElement, 0, 0, inferW, inferH);
+        mirrorCtx.restore();
+
+        bitmap = await createImageBitmap(mirrorCanvas);
+      } else {
+        bitmap = await createImageBitmap(mediaElement, {
+          resizeWidth: inferW,
+          resizeHeight: inferH,
+          resizeQuality: "low",
+        });
+      }
 
       if (overlayRef.current.width !== inferW || overlayRef.current.height !== inferH) {
         overlayRef.current.width = inferW;
@@ -750,7 +773,6 @@ function App() {
 
   const imageLoad = useCallback(() => {}, []);
 
-  const candidates = currentMatch.candidates.slice(0, 2);
   const shownMatch = stableMatch ?? currentMatch.best;
 
   return (

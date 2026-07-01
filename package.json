@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "download:videos": "node scripts/download-videos.js",
     "extract:poses": "node scripts/extract-poses.js",
+    "extract:audio": "node scripts/extract-audio.js",
     "preview": "vite preview",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"

@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { existsSync } from "node:fs";
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -696,12 +696,24 @@ async function main() {
   console.log(`Loading model: ${path.relative(PROJECT_ROOT, options.model)}`);
   const session = await createSession(options.model);
 
-  const index = {
+  const indexPath = path.join(options.output, "index.json");
+  let index = {
     schemaVersion: 1,
     createdAt: new Date().toISOString(),
     outputDirectory: path.relative(PROJECT_ROOT, options.output).replaceAll("\\", "/"),
     dances: [],
   };
+
+  if (existsSync(indexPath)) {
+    try {
+      const existingData = JSON.parse(await readFile(indexPath, "utf8"));
+      if (Array.isArray(existingData.dances)) {
+        index.dances = existingData.dances;
+      }
+    } catch (e) {
+      console.warn(`Failed to load existing index.json, starting fresh: ${e.message}`);
+    }
+  }
 
   for (const videoPath of videos) {
     console.log(`\nExtracting ${path.basename(videoPath)} at ${options.fps} FPS`);
@@ -710,22 +722,32 @@ async function main() {
     const outputPath = path.join(options.output, outputFile);
     await writeFile(outputPath, `${JSON.stringify(catalogue, null, 2)}\n`);
 
-    index.dances.push({
+    const newDanceEntry = {
       id: catalogue.danceId,
       title: catalogue.title,
       file: outputFile,
       source: catalogue.source.file,
+      audioUrl: `/audio/${catalogue.danceId}.mp3`,
       sampledFps: catalogue.source.sampledFps,
       detectedFrames: catalogue.stats.detectedFrames,
       sampledFrames: catalogue.stats.sampledFrames,
       detectionRate: catalogue.stats.detectionRate,
-    });
+    };
+
+    const existingIndex = index.dances.findIndex((d) => d.id === newDanceEntry.id);
+    if (existingIndex !== -1) {
+      index.dances[existingIndex] = {
+        ...index.dances[existingIndex],
+        ...newDanceEntry,
+      };
+    } else {
+      index.dances.push(newDanceEntry);
+    }
 
     console.log(`  wrote ${path.relative(PROJECT_ROOT, outputPath)}`);
     console.log(`  detection rate ${(catalogue.stats.detectionRate * 100).toFixed(1)}%`);
   }
 
-  const indexPath = path.join(options.output, "index.json");
   await writeFile(indexPath, `${JSON.stringify(index, null, 2)}\n`);
   console.log(`\nWrote ${path.relative(PROJECT_ROOT, indexPath)}`);
 }

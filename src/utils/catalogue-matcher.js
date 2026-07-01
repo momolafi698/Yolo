@@ -175,6 +175,7 @@ function prepareDance(entry) {
     id: entry.id,
     title: entry.title,
     source: entry.source,
+    audioUrl: entry.audioUrl,
     sampledFps: entry.sampledFps,
     detectedFrames: entry.detectedFrames,
     sampledFrames: entry.sampledFrames,

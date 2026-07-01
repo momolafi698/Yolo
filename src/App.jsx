@@ -69,6 +69,7 @@ function App() {
   const [videoSrc, setVideoSrc] = useState("");
   const [videoName, setVideoName] = useState("");
   const [activeFeature, setActiveFeature] = useState(null);
+  const [selectedDanceId, setSelectedDanceId] = useState(null);
   const [gameState, setGameState] = useState("idle");
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
   const [sequenceSampleCount, setSequenceSampleCount] = useState(0);
@@ -108,6 +109,7 @@ function App() {
   const lastScoreTimeRef = useRef(0);
   const lastCommentRef = useRef("");
   const lastCommentTimeRef = useRef(0);
+  const currentAudioRef = useRef(null);
 
   useEffect(() => {
     activeFeatureRef.current = activeFeature;
@@ -210,6 +212,56 @@ function App() {
       "Prepare-toi. Detection temporelle dans 5 secondes.",
     ]);
   }, [resetLiveComparison]);
+
+  const stopMusic = useCallback(() => {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current.currentTime = 0;
+      currentAudioRef.current = null;
+    }
+  }, []);
+
+  const playMusicForCamera = useCallback(() => {
+    stopMusic();
+
+    if (!catalogue?.dances || catalogue.dances.length === 0) return;
+
+    let selectedDance = null;
+    if (selectedDanceId) {
+      selectedDance = catalogue.dances.find((d) => d.id === selectedDanceId);
+    }
+
+    if (!selectedDance || !selectedDance.audioUrl) {
+      const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
+      if (dancesWithAudio.length > 0) {
+        const randomIndex = Math.floor(Math.random() * dancesWithAudio.length);
+        selectedDance = dancesWithAudio[randomIndex];
+      }
+    }
+
+    if (selectedDance && selectedDance.audioUrl) {
+      const baseUrl = import.meta.env.BASE_URL || "/";
+      const audioPath = `${baseUrl.replace(/\/+$/, "")}/${selectedDance.audioUrl.replace(/^\/+/, "")}`;
+      const audio = new Audio(audioPath);
+      audio.loop = true;
+      audio.volume = 0.4;
+      audio.play().catch((err) => {
+        console.warn("Autoplay block or music play failed:", err);
+      });
+      currentAudioRef.current = audio;
+    }
+  }, [catalogue, selectedDanceId, stopMusic]);
+
+  useEffect(() => {
+    if (activeFeature === "camera") {
+      playMusicForCamera();
+    } else {
+      stopMusic();
+    }
+    return () => {
+      stopMusic();
+    };
+  }, [activeFeature, selectedDanceId, playMusicForCamera, stopMusic]);
 
   const handleInferenceResult = useCallback(
     (data) => {
@@ -759,17 +811,32 @@ function App() {
               {catalogueStatus.message}
             </p>
             <div className="mt-4 flex flex-col gap-2">
-              {(catalogue?.dances ?? []).map((dance) => (
-                <div
-                  key={dance.id}
-                  className="flex items-center justify-between gap-3 bg-[#050818]/70 border border-violet-500/20 rounded-lg px-3 py-2"
-                >
-                  <span className="font-semibold text-slate-100 truncate">{dance.title}</span>
-                  <span className="text-xs text-slate-400 shrink-0">
-                    {dance.detectedFrames}/{dance.sampledFrames}
-                  </span>
-                </div>
-              ))}
+              {(catalogue?.dances ?? []).map((dance) => {
+                const isSelected = dance.id === selectedDanceId;
+                return (
+                  <div
+                    key={dance.id}
+                    onClick={() => setSelectedDanceId(isSelected ? null : dance.id)}
+                    className={`flex items-center justify-between gap-3 bg-[#050818]/70 border rounded-lg px-3 py-2 cursor-pointer transition-all duration-200 ${
+                      isSelected
+                        ? "border-fuchsia-500 shadow-[0_0_12px_rgba(217,70,239,0.35)] bg-fuchsia-950/20"
+                        : "border-violet-500/20 hover:border-violet-500/50"
+                    }`}
+                  >
+                    <div className="flex flex-col min-w-0">
+                      <span className="font-semibold text-slate-100 truncate">{dance.title}</span>
+                      {dance.audioUrl && (
+                        <span className="text-[10px] text-fuchsia-400 font-medium flex items-center gap-1 mt-0.5">
+                          🎵 Musique liée
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs text-slate-400 shrink-0">
+                      {dance.detectedFrames}/{dance.sampledFrames}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "createdAt": "2026-07-01T07:12:42.687Z",
+  "createdAt": "2026-07-01T08:38:02.278Z",
   "outputDirectory": "public/catalogue/poses",
   "dances": [
     {
@@ -8,6 +8,7 @@
       "title": "cortis-redred",
       "file": "cortis-redred.poses.json",
       "source": "videos/cortis-redred.mp4",
+      "audioUrl": "/audio/cortis-redred.mp3",
       "sampledFps": 30,
       "detectedFrames": 4850,
       "sampledFrames": 4987,
@@ -18,6 +19,7 @@
       "title": "killit-karisma",
       "file": "killit-karisma.poses.json",
       "source": "videos/killit-karisma.mp4",
+      "audioUrl": "/audio/killit-karisma.mp3",
       "sampledFps": 30,
       "detectedFrames": 629,
       "sampledFrames": 630,
@@ -28,10 +30,44 @@
       "title": "redred-karisma",
       "file": "redred-karisma.poses.json",
       "source": "videos/redred-karisma.mp4",
+      "audioUrl": "/audio/redred-karisma.mp3",
       "sampledFps": 30,
       "detectedFrames": 679,
       "sampledFrames": 680,
       "detectionRate": 0.9985
+    },
+    {
+      "id": "green-grass-dance",
+      "title": "Green Grass dance",
+      "file": "green-grass-dance.poses.json",
+      "source": "videos/Green Grass dance.mp4",
+      "audioUrl": "/audio/green-grass-dance.mp3",
+      "sampledFps": 10,
+      "detectedFrames": 88,
+      "sampledFrames": 88,
+      "detectionRate": 1
+    },
+    {
+      "id": "redred-dance",
+      "title": "redred dance",
+      "file": "redred-dance.poses.json",
+      "source": "videos/redred dance.mp4",
+      "audioUrl": "/audio/redred-dance.mp3",
+      "sampledFps": 10,
+      "detectedFrames": 233,
+      "sampledFrames": 233,
+      "detectionRate": 1
+    },
+    {
+      "id": "tyla-dance",
+      "title": "Tyla dance",
+      "file": "tyla-dance.poses.json",
+      "source": "videos/Tyla dance.mp4",
+      "audioUrl": "/audio/tyla-dance.mp3",
+      "sampledFps": 10,
+      "detectedFrames": 107,
+      "sampledFrames": 107,
+      "detectionRate": 1
     }
   ]
 }

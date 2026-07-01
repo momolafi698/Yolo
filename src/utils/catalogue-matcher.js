@@ -26,7 +26,7 @@ const ANGLE_NAMES = [
 
 const DEFAULT_OPTIONS = {
   keypointThreshold: 0.20,
-  maxPointDistance: 1.15,
+  maxPointDistance: 1.35,
   minComparableKeypoints: 8,
   minConfidence: 52,
   minSequenceSamples: 8,
@@ -232,7 +232,7 @@ function findBestSequence(samples, dance, config) {
   const latestStart = Math.max(0, dance.frames.at(-1).timestamp - liveDuration * 0.85);
   const startStep = Math.max(0.2, 1 / (dance.sampledFps || 10));
 
-  const tolerance = config.timeTolerance ?? 0.8;
+  const tolerance = config.timeTolerance ?? 2.0;
   const minStart = Math.max(0, firstLiveTimestamp - tolerance);
   const maxStart = Math.min(latestStart, firstLiveTimestamp + tolerance);
 
@@ -406,7 +406,7 @@ function compareAngles(liveAngles, referenceAngles) {
   }
 
   const averageDiff = diffSum / count;
-  return Math.max(0, 100 * (1 - averageDiff / 90));
+  return Math.max(0, 100 * (1 - averageDiff / 105));
 }
 
 const MIN_NORM_SCALE = 15;

@@ -47,7 +47,7 @@ const DEBUG_TARGET_COLORS = {
   skeletonLineWidth: 3,
   label: "target",
 };
-const DEBUG_TARGET_SCALE = 0.5;
+const DEBUG_TARGET_SCALE = 0.15;
 const DEBUG_TARGET_X_OFFSET = -100;
 const POSE_KEYPOINTS = {
   leftShoulder: 5,
@@ -734,6 +734,7 @@ function App() {
           mirrorCanvas.width = inferW;
           mirrorCanvas.height = inferH;
         }
+
         mirrorCtx.clearRect(0, 0, inferW, inferH);
         mirrorCtx.save();
         mirrorCtx.translate(inferW, 0);
@@ -938,7 +939,7 @@ function App() {
 
   const imageLoad = useCallback(() => {}, []);
 
-  const instantCandidates = currentMatch?.candidates ?? [];
+  const instantCandidates = (currentMatch?.candidates ?? []).slice(0, 2);
   const shownMatch = stableMatch ?? currentMatch.best;
 
   return (

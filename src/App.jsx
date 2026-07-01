@@ -132,37 +132,7 @@ function App() {
     if (videoSrc) URL.revokeObjectURL(videoSrc);
   }, [videoSrc]);
 
-  useEffect(() => {
-    if (gameState !== "countdown") return undefined;
 
-    const interval = window.setInterval(() => {
-      setCountdown((current) => {
-        if (current <= 1) {
-          window.clearInterval(interval);
-          sequenceStartRef.current = performance.now();
-          liveSequenceRef.current = [];
-          matchHistoryRef.current = [];
-          setSequenceSampleCount(0);
-          setGameState("detecting");
-          setPerformanceRating({
-            text: "CHERCHE",
-            color: "text-violet-300 font-bold animate-pulse",
-          });
-          setCoachComments([
-            "C'est parti. Je compare maintenant ton mouvement dans le temps.",
-          ]);
-          if (activeFeatureRef.current === "camera") {
-            playMusicForCamera();
-          }
-          return 0;
-        }
-
-        return current - 1;
-      });
-    }, 1000);
-
-    return () => window.clearInterval(interval);
-  }, [gameState, playMusicForCamera]);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,6 +299,38 @@ function App() {
       stopMusic();
     };
   }, [activeFeature, selectedDanceId, playMusicForCamera, stopMusic]);
+
+  useEffect(() => {
+    if (gameState !== "countdown") return undefined;
+
+    const interval = window.setInterval(() => {
+      setCountdown((current) => {
+        if (current <= 1) {
+          window.clearInterval(interval);
+          sequenceStartRef.current = performance.now();
+          liveSequenceRef.current = [];
+          matchHistoryRef.current = [];
+          setSequenceSampleCount(0);
+          setGameState("detecting");
+          setPerformanceRating({
+            text: "CHERCHE",
+            color: "text-violet-300 font-bold animate-pulse",
+          });
+          setCoachComments([
+            "C'est parti. Je compare maintenant ton mouvement dans le temps.",
+          ]);
+          if (activeFeatureRef.current === "camera") {
+            playMusicForCamera();
+          }
+          return 0;
+        }
+
+        return current - 1;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [gameState, playMusicForCamera]);
 
   const handleInferenceResult = useCallback(
     (data) => {
@@ -899,20 +901,17 @@ function App() {
             >
               {activeFeature === "video" ? "Fermer la video" : "Tester une video"}
             </button>
-            <button
-              onClick={() => {
-                if (activeFeature === "video") {
+            {activeFeature === "video" && (
+              <button
+                onClick={() => {
                   resetLiveComparison();
                   processMediaFrame(videoRef.current);
-                } else {
-                  prepareCountdown();
-                }
-              }}
-              className="px-5 py-2.5 rounded-lg bg-[#050818] hover:bg-violet-950 text-violet-200 border border-violet-500/30 font-bold transition-all cursor-pointer"
-              disabled={activeFeature !== "camera" && activeFeature !== "video"}
-            >
-              {activeFeature === "video" ? "Reset analyse" : "Relancer 5s"}
-            </button>
+                }}
+                className="px-5 py-2.5 rounded-lg bg-[#050818] hover:bg-violet-950 text-violet-200 border border-violet-500/30 font-bold transition-all cursor-pointer"
+              >
+                Reset analyse
+              </button>
+            )}
           </div>
           {activeFeature === "video" && (
             <p className="text-xs text-slate-400 truncate">

@@ -1,12 +1,21 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
+
+let ffmpegPath = null;
+try {
+  ffmpegPath = require("ffmpeg-static");
+} catch (e) {
+  // ignore
+}
 
 const DEFAULTS = {
   input: "video-urls.txt",
@@ -118,8 +127,13 @@ function runYtDlp(url, options) {
     options.archive,
     "--no-overwrites",
     "--continue",
-    url,
   ];
+
+  if (ffmpegPath) {
+    args.push("--ffmpeg-location", ffmpegPath);
+  }
+
+  args.push(url);
 
   return new Promise((resolve, reject) => {
     const child = spawn(executable, args, { stdio: "inherit" });

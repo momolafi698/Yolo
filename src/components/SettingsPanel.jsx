@@ -182,7 +182,7 @@ const SettingsPanel = memo(function SettingsPanel({
             <div className="flex flex-col">
               <label className={labelClass}>Image Strategy</label>
               <select
-                disabled={activeFeature !== null}
+                disabled={activeFeature === "loading"}
                 ref={imgszTypeSelectorRef}
                 defaultValue={defaultModelConfig?.imgszType ?? "dynamic"}
                 onChange={(e) => {
@@ -190,7 +190,8 @@ const SettingsPanel = memo(function SettingsPanel({
                 }}
                 className={inputClass}
               >
-                <option value="dynamic">Dynamic (Resize)</option>
+                <option value="letterbox">Letterbox (640x640, most accurate)</option>
+                <option value="dynamic">Dynamic (Resize, fastest)</option>
                 <option value="zeroPad">Zero Padding</option>
               </select>
             </div>

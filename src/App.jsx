@@ -86,7 +86,7 @@ function App() {
     text: "PRET",
     color: "text-slate-400",
   });
-  const [coachComments, setCoachComments] = useState([
+  const [, setCoachComments] = useState([
     "Active la camera et reproduis un mouvement extrait d'une des deux videos.",
   ]);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
@@ -969,23 +969,7 @@ function App() {
 
       <PoseOverlayTool catalogue={catalogue} />
 
-      <section className="captor-grid">
-        <div className="card-violet flex flex-col gap-3 xl:col-span-3">
-          <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
-            Journal
-          </h2>
-          <div className="flex flex-col gap-2">
-            {coachComments.map((comment, index) => (
-              <div
-                key={`${comment}-${index}`}
-                className="bg-[#050818]/60 border-l-2 border-violet-500 px-3 py-2 text-sm text-slate-300 rounded-r-md animate-details-show"
-              >
-                {comment}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+
 
       <footer className="mt-2 border-t border-violet-500/10 pt-4 flex flex-col items-center">
         <button

@@ -1,16 +1,4 @@
 # 🚀 YOLO Multi-Task Web App
-
-<div align="center">
-<img src="./preview.png" width="80%" alt="YOLO Multi-Task Preview">
-
-<br>
-
-[![ONNX Runtime Web](https://img.shields.io/badge/ONNX%20Runtime-Web-blue)](https://onnxruntime.ai/)
-[![YOLO](https://img.shields.io/badge/YOLO-26n-green)](https://github.com/ultralytics/ultralytics)
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
-
-</div>
-
 ## 📖 Introduction
 
 This web application, built on **ONNX Runtime Web**, brings the power of YOLO directly to your browser. It supports full client-side inference for Object Detection, Pose Estimation, and Instance Segmentation without sending data to a server.

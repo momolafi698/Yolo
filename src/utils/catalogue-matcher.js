@@ -26,7 +26,7 @@ const ANGLE_NAMES = [
 
 const DEFAULT_OPTIONS = {
   keypointThreshold: 0.20,
-  maxPointDistance: 1.35,
+  maxPointDistance: 2.2,
   minComparableKeypoints: 8,
   minConfidence: 52,
   minSequenceSamples: 8,
@@ -464,7 +464,7 @@ function compareAngles(liveAngles, referenceAngles) {
   }
 
   const averageDiff = diffSum / count;
-  return Math.max(0, 100 * (1 - averageDiff / 105));
+  return Math.max(0, 100 * (1 - averageDiff / 130));
 }
 
 const MIN_NORM_SCALE = 15;

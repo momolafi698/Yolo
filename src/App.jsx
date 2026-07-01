@@ -37,7 +37,7 @@ const DEFAULT_MODEL_CONFIG = {
   classes,
 };
 
-const COUNTDOWN_SECONDS = 3;
+const COUNTDOWN_SECONDS = 5;
 const SEQUENCE_WINDOW_SECONDS = 4;
 
 function getHighestScorePose(results) {
@@ -151,6 +151,9 @@ function App() {
           setCoachComments([
             "C'est parti. Je compare maintenant ton mouvement dans le temps.",
           ]);
+          if (activeFeatureRef.current === "camera") {
+            playMusicForCamera();
+          }
           return 0;
         }
 
@@ -159,7 +162,7 @@ function App() {
     }, 1000);
 
     return () => window.clearInterval(interval);
-  }, [gameState]);
+  }, [gameState, playMusicForCamera]);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,7 +221,7 @@ function App() {
       color: "text-cyan-300 font-black",
     });
     setCoachComments([
-      "Prepare-toi. Detection temporelle dans 3 secondes.",
+      "Prepare-toi. Detection temporelle dans 5 secondes.",
     ]);
   }, [resetLiveComparison]);
 
@@ -277,10 +280,10 @@ function App() {
           score: finalScore,
         });
         setGameState("pause");
-        setPauseCountdown(3);
+        setPauseCountdown(5);
         setAudioTimeLeft(null);
 
-        let remaining = 3;
+        let remaining = 5;
         const intervalId = window.setInterval(() => {
           remaining -= 1;
           setPauseCountdown(remaining);
@@ -315,7 +318,7 @@ function App() {
   useEffect(() => {
     queueMicrotask(() => {
       if (activeFeature === "camera") {
-        if (gameState === "detecting") {
+        if (gameStateRef.current === "detecting") {
           playMusicForCamera();
         }
       } else {
@@ -325,7 +328,7 @@ function App() {
     return () => {
       stopMusic();
     };
-  }, [activeFeature, selectedDanceId, gameState, playMusicForCamera, stopMusic]);
+  }, [activeFeature, selectedDanceId, playMusicForCamera, stopMusic]);
 
   const handleInferenceResult = useCallback(
     (data) => {
@@ -908,7 +911,7 @@ function App() {
               className="px-5 py-2.5 rounded-lg bg-[#050818] hover:bg-violet-950 text-violet-200 border border-violet-500/30 font-bold transition-all cursor-pointer"
               disabled={activeFeature !== "camera" && activeFeature !== "video"}
             >
-              {activeFeature === "video" ? "Reset analyse" : "Relancer 3s"}
+              {activeFeature === "video" ? "Reset analyse" : "Relancer 5s"}
             </button>
           </div>
           {activeFeature === "video" && (

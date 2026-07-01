@@ -110,6 +110,7 @@ function App() {
   const lastCommentRef = useRef("");
   const lastCommentTimeRef = useRef(0);
   const currentAudioRef = useRef(null);
+  const audioTimeoutRef = useRef(null);
 
   useEffect(() => {
     activeFeatureRef.current = activeFeature;
@@ -214,6 +215,10 @@ function App() {
   }, [resetLiveComparison]);
 
   const stopMusic = useCallback(() => {
+    if (audioTimeoutRef.current) {
+      clearTimeout(audioTimeoutRef.current);
+      audioTimeoutRef.current = null;
+    }
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current.currentTime = 0;
@@ -247,16 +252,18 @@ function App() {
       audio.volume = 0.4;
 
       audio.addEventListener("ended", () => {
-        const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
-        if (dancesWithAudio.length > 1) {
-          const currentIndex = dancesWithAudio.findIndex((d) => d.id === selectedDance.id);
-          const nextIndex = (currentIndex + 1) % dancesWithAudio.length;
-          const nextDance = dancesWithAudio[nextIndex];
-          setSelectedDanceId(nextDance.id);
-        } else if (dancesWithAudio.length === 1) {
-          audio.currentTime = 0;
-          audio.play().catch((err) => console.warn("Replay failed:", err));
-        }
+        audioTimeoutRef.current = setTimeout(() => {
+          const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
+          if (dancesWithAudio.length > 1) {
+            const currentIndex = dancesWithAudio.findIndex((d) => d.id === selectedDance.id);
+            const nextIndex = (currentIndex + 1) % dancesWithAudio.length;
+            const nextDance = dancesWithAudio[nextIndex];
+            setSelectedDanceId(nextDance.id);
+          } else if (dancesWithAudio.length === 1) {
+            audio.currentTime = 0;
+            audio.play().catch((err) => console.warn("Replay failed:", err));
+          }
+        }, 3000);
       });
 
       audio.play().catch((err) => {
@@ -698,7 +705,8 @@ function App() {
       </header>
 
       <main className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] gap-6 items-start">
-        <section className="relative">
+        <div className="flex flex-col gap-4">
+          <section className="relative">
           <ImageDisplay
             cameraRef={cameraRef}
             videoRef={videoRef}
@@ -765,6 +773,72 @@ function App() {
             </div>
           )}
         </section>
+
+        <div className="card-violet flex flex-col gap-3">
+          <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
+            Commandes
+          </h2>
+          <input
+            ref={fileVideoRef}
+            type="file"
+            accept="video/*"
+            hidden
+            onChange={(event) => {
+              handleVideoFile(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={toggleCamera}
+              className={`px-5 py-2.5 rounded-lg font-bold shadow-md transition-all cursor-pointer ${
+                activeFeature === "camera"
+                  ? "bg-red-600 hover:bg-red-500 text-white"
+                  : "bg-violet-600 hover:bg-violet-500 text-white"
+              }`}
+              disabled={activeFeature === "loading"}
+            >
+              {activeFeature === "camera" ? "Arreter la camera" : "Activer la camera"}
+            </button>
+            <button
+              onClick={() => {
+                if (activeFeature === "video") {
+                  stopVideo();
+                } else {
+                  fileVideoRef.current?.click();
+                }
+              }}
+              className={`px-5 py-2.5 rounded-lg font-bold shadow-md transition-all cursor-pointer ${
+                activeFeature === "video"
+                  ? "bg-red-600 hover:bg-red-500 text-white"
+                  : "bg-cyan-600 hover:bg-cyan-500 text-white"
+              }`}
+              disabled={activeFeature === "loading" || activeFeature === "camera"}
+            >
+              {activeFeature === "video" ? "Fermer la video" : "Tester une video"}
+            </button>
+            <button
+              onClick={() => {
+                if (activeFeature === "video") {
+                  resetLiveComparison();
+                  processMediaFrame(videoRef.current);
+                } else {
+                  prepareCountdown();
+                }
+              }}
+              className="px-5 py-2.5 rounded-lg bg-[#050818] hover:bg-violet-950 text-violet-200 border border-violet-500/30 font-bold transition-all cursor-pointer"
+              disabled={activeFeature !== "camera" && activeFeature !== "video"}
+            >
+              {activeFeature === "video" ? "Reset analyse" : "Relancer 5s"}
+            </button>
+          </div>
+          {activeFeature === "video" && (
+            <p className="text-xs text-slate-400 truncate">
+              Source video : {videoName || "video locale"}
+            </p>
+          )}
+        </div>
+      </div>
 
         <aside className="flex flex-col gap-4">
           <div className="card-violet">
@@ -896,72 +970,7 @@ function App() {
       <PoseOverlayTool catalogue={catalogue} />
 
       <section className="captor-grid">
-        <div className="card-violet flex flex-col gap-3">
-          <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
-            Commandes
-          </h2>
-          <input
-            ref={fileVideoRef}
-            type="file"
-            accept="video/*"
-            hidden
-            onChange={(event) => {
-              handleVideoFile(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={toggleCamera}
-              className={`px-5 py-2.5 rounded-lg font-bold shadow-md transition-all cursor-pointer ${
-                activeFeature === "camera"
-                  ? "bg-red-600 hover:bg-red-500 text-white"
-                  : "bg-violet-600 hover:bg-violet-500 text-white"
-              }`}
-              disabled={activeFeature === "loading"}
-            >
-              {activeFeature === "camera" ? "Arreter la camera" : "Activer la camera"}
-            </button>
-            <button
-              onClick={() => {
-                if (activeFeature === "video") {
-                  stopVideo();
-                } else {
-                  fileVideoRef.current?.click();
-                }
-              }}
-              className={`px-5 py-2.5 rounded-lg font-bold shadow-md transition-all cursor-pointer ${
-                activeFeature === "video"
-                  ? "bg-red-600 hover:bg-red-500 text-white"
-                  : "bg-cyan-600 hover:bg-cyan-500 text-white"
-              }`}
-              disabled={activeFeature === "loading" || activeFeature === "camera"}
-            >
-              {activeFeature === "video" ? "Fermer la video" : "Tester une video"}
-            </button>
-            <button
-              onClick={() => {
-                if (activeFeature === "video") {
-                  resetLiveComparison();
-                  processMediaFrame(videoRef.current);
-                } else {
-                  prepareCountdown();
-                }
-              }}
-              className="px-5 py-2.5 rounded-lg bg-[#050818] hover:bg-violet-950 text-violet-200 border border-violet-500/30 font-bold transition-all cursor-pointer"
-              disabled={activeFeature !== "camera" && activeFeature !== "video"}
-            >
-              {activeFeature === "video" ? "Reset analyse" : "Relancer 5s"}
-            </button>
-          </div>
-          {activeFeature === "video" && (
-            <p className="text-xs text-slate-400 truncate">
-              Source video : {videoName || "video locale"}
-            </p>
-          )}
-        </div>
-
-        <div className="card-violet flex flex-col gap-3 xl:col-span-2">
+        <div className="card-violet flex flex-col gap-3 xl:col-span-3">
           <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
             Journal
           </h2>

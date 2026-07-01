@@ -84,6 +84,7 @@ function App() {
   const [dancePrecision, setDancePrecision] = useState(0);
   const [lastDanceInfo, setLastDanceInfo] = useState(null);
   const [pauseCountdown, setPauseCountdown] = useState(0);
+  const [audioTimeLeft, setAudioTimeLeft] = useState(null);
   const [performanceRating, setPerformanceRating] = useState({
     text: "PRET",
     color: "text-slate-400",
@@ -234,6 +235,7 @@ function App() {
     }
     setLastDanceInfo(null);
     setPauseCountdown(0);
+    setAudioTimeLeft(null);
   }, []);
 
   const playMusicForCamera = useCallback(() => {
@@ -260,6 +262,13 @@ function App() {
       const audio = new Audio(audioPath);
       audio.loop = false;
       audio.volume = 0.4;
+ 
+      audio.addEventListener("timeupdate", () => {
+        if (!isNaN(audio.duration)) {
+          const remaining = Math.max(0, audio.duration - audio.currentTime);
+          setAudioTimeLeft(Math.ceil(remaining));
+        }
+      });
 
       audio.addEventListener("ended", () => {
         const finalScore = danceScoreRef.current;
@@ -268,9 +277,10 @@ function App() {
           score: finalScore,
         });
         setGameState("pause");
-        setPauseCountdown(3);
+        setPauseCountdown(5);
+        setAudioTimeLeft(null);
 
-        let remaining = 3;
+        let remaining = 5;
         const intervalId = window.setInterval(() => {
           remaining -= 1;
           setPauseCountdown(remaining);
@@ -294,7 +304,7 @@ function App() {
 
         audioTimeoutRef.current = intervalId;
       });
-
+ 
       audio.play().catch((err) => {
         console.warn("Autoplay block or music play failed:", err);
       });
@@ -753,6 +763,7 @@ function App() {
             onVideoEnded={handleVideoEnded}
             onImageLoad={imageLoad}
             activeFeature={activeFeature}
+            audioTimeLeft={audioTimeLeft}
           />
 
           {activeFeature === "loading" && (

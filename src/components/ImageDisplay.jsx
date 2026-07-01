@@ -15,14 +15,23 @@ const ImageDisplay = memo(function ImageDisplay({
   onVideoEnded,
   onImageLoad,
   activeFeature,
+  audioTimeLeft,
 }) {
   return (
     <div className="container bg-gray-800 rounded-2xl shadow-xl border border-gray-700 p-5 mb-6 relative min-h-[400px] flex flex-col">
       <div className="flex items-center justify-between mb-2">
-        <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-          <span className="w-2 h-6 bg-violet-500 rounded-full inline-block"></span>
-          Preview
-        </h2>
+        <div className="flex items-center gap-4">
+          <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+            <span className="w-2 h-6 bg-violet-500 rounded-full inline-block"></span>
+            Preview
+          </h2>
+          {audioTimeLeft !== null && audioTimeLeft !== undefined && (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-fuchsia-950/40 border border-fuchsia-500/30 text-fuchsia-300 font-mono text-xs font-bold shadow-[0_0_10px_rgba(217,70,239,0.25)]">
+              <span className="w-2.5 h-2.5 rounded-full bg-fuchsia-500 animate-ping inline-block mr-0.5"></span>
+              🎵 {Math.floor(audioTimeLeft / 60)}:{(audioTimeLeft % 60).toString().padStart(2, "0")} restant
+            </div>
+          )}
+        </div>
 
         {activeFeature && (
           <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-gray-700/50 border border-gray-600/50">

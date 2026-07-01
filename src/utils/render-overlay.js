@@ -38,6 +38,7 @@ export async function renderOverlay(
   overlayCtx,
   task,
   classes,
+  options = {},
 ) {
   if (!predictions || predictions.length === 0) return;
 
@@ -51,7 +52,7 @@ export async function renderOverlay(
   // Draw based on task type
   switch (task) {
     case "pose":
-      drawPoseEstimation(predictions, overlayCtx, lineWidth);
+      drawPoseEstimation(predictions, overlayCtx, lineWidth, options.pose);
       break;
     case "seg":
       if (maskImageData) {
@@ -131,12 +132,21 @@ function drawBoundingBoxes(predictions, ctx, lineWidth, classes) {
  * @param {CanvasRenderingContext2D} ctx - The canvas 2D context.
  * @param {number} lineWidth - Thickness of lines.
  */
-function drawPoseEstimation(predictions, ctx, lineWidth) {
+function drawPoseEstimation(predictions, ctx, lineWidth, options = {}) {
   if (!predictions || predictions.length === 0) return;
+
+  const colors = {
+    bbox: options.bboxColor ?? "green",
+    labelBackground: options.labelBackground ?? "rgba(0, 128, 0, 0.8)",
+    skeleton: options.skeletonColor ?? "rgb(255, 165, 0)",
+    keypoint: options.keypointColor ?? "red",
+  };
+  const showLabel = options.showLabel ?? true;
+  const label = options.label ?? null;
 
   // 1. draw bounding boxes
   ctx.lineWidth = lineWidth;
-  ctx.strokeStyle = "green";
+  ctx.strokeStyle = colors.bbox;
   ctx.beginPath();
   predictions.forEach((predict) => {
     const [x1, y1, width, height] = predict.bbox;
@@ -145,17 +155,19 @@ function drawPoseEstimation(predictions, ctx, lineWidth) {
   ctx.stroke();
 
   // 2. draw score text
-  ctx.font = "16px Arial";
-  predictions.forEach((predict) => {
-    const [x1, y1] = predict.bbox;
-    const text = `score ${predict.score.toFixed(2)}`;
+  if (showLabel) {
+    ctx.font = "16px Arial";
+    predictions.forEach((predict) => {
+      const [x1, y1] = predict.bbox;
+      const text = label ?? `score ${predict.score.toFixed(2)}`;
 
-    drawTextWithBackground(ctx, text, x1, y1, "rgba(0, 128, 0, 0.8)");
-  });
+      drawTextWithBackground(ctx, text, x1, y1, colors.labelBackground);
+    });
+  }
 
   // 3. draw skeleton
-  ctx.strokeStyle = "rgb(255, 165, 0)";
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = colors.skeleton;
+  ctx.lineWidth = options.skeletonLineWidth ?? 2;
   ctx.beginPath();
   predictions.forEach((predict) => {
     if (!predict.keypoints) return;
@@ -171,7 +183,7 @@ function drawPoseEstimation(predictions, ctx, lineWidth) {
   ctx.stroke();
 
   // 4. draw keypoints
-  ctx.fillStyle = "red";
+  ctx.fillStyle = colors.keypoint;
   ctx.beginPath();
   predictions.forEach((predict) => {
     if (!predict.keypoints) return;

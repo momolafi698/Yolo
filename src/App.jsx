@@ -39,6 +39,22 @@ const DEFAULT_MODEL_CONFIG = {
 
 const COUNTDOWN_SECONDS = 5;
 const SEQUENCE_WINDOW_SECONDS = 4;
+const DEBUG_TARGET_COLORS = {
+  bboxColor: "rgba(34, 211, 238, 0.95)",
+  labelBackground: "rgba(8, 145, 178, 0.85)",
+  skeletonColor: "rgba(34, 211, 238, 0.95)",
+  keypointColor: "rgba(244, 114, 182, 0.95)",
+  skeletonLineWidth: 3,
+  label: "target",
+};
+const DEBUG_TARGET_SCALE = 0.5;
+const DEBUG_TARGET_X_OFFSET = -100;
+const POSE_KEYPOINTS = {
+  leftShoulder: 5,
+  rightShoulder: 6,
+  leftHip: 11,
+  rightHip: 12,
+};
 
 function getHighestScorePose(results) {
   if (!Array.isArray(results) || results.length === 0) {
@@ -50,6 +66,109 @@ function getHighestScorePose(results) {
     const currentScore = current?.score ?? current?.confidence ?? 0;
     return currentScore > bestScore ? current : best;
   }, results[0]);
+}
+
+function findNearestCatalogueFrame(frames, timestamp) {
+  if (!frames?.length) return null;
+
+  let low = 0;
+  let high = frames.length - 1;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (frames[mid].timestamp < timestamp) low = mid + 1;
+    else high = mid - 1;
+  }
+
+  const previous = frames[high];
+  const next = frames[low];
+  if (!previous) return next ?? null;
+  if (!next) return previous;
+  return Math.abs(previous.timestamp - timestamp) <= Math.abs(next.timestamp - timestamp)
+    ? previous
+    : next;
+}
+
+function isVisibleKeypoint(point, threshold = 0.2) {
+  return point && Number.isFinite(point.x) && Number.isFinite(point.y) && (point.score ?? 0) >= threshold;
+}
+
+function midpoint(a, b) {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  };
+}
+
+function getPoseProjectionAnchor(pose) {
+  const keypoints = pose?.keypoints;
+  if (!keypoints?.length) return null;
+
+  const leftHip = keypoints[POSE_KEYPOINTS.leftHip];
+  const rightHip = keypoints[POSE_KEYPOINTS.rightHip];
+  const leftShoulder = keypoints[POSE_KEYPOINTS.leftShoulder];
+  const rightShoulder = keypoints[POSE_KEYPOINTS.rightShoulder];
+
+  if (!isVisibleKeypoint(leftHip) || !isVisibleKeypoint(rightHip)) return null;
+
+  const origin = midpoint(leftHip, rightHip);
+  let scale = null;
+
+  if (isVisibleKeypoint(leftShoulder) && isVisibleKeypoint(rightShoulder)) {
+    const shoulderWidth = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
+    if (shoulderWidth >= 15) scale = shoulderWidth;
+  }
+
+  if (!scale) {
+    const shoulders = [leftShoulder, rightShoulder].filter((point) => isVisibleKeypoint(point));
+    if (shoulders.length > 0) {
+      const shoulderMid = shoulders.length === 2 ? midpoint(leftShoulder, rightShoulder) : shoulders[0];
+      const torsoHeight = Math.hypot(origin.x - shoulderMid.x, origin.y - shoulderMid.y);
+      if (torsoHeight >= 15) scale = torsoHeight;
+    }
+  }
+
+  return scale ? { origin, scale } : null;
+}
+
+function createDebugTargetPrediction(dance, match, liveSequence, detectedPose, elapsedSeconds, canvas) {
+  if (!dance?.frames?.length || !detectedPose?.keypoints || !canvas) return null;
+
+  const firstLiveTimestamp = liveSequence?.[0]?.timestamp ?? elapsedSeconds;
+  const targetTimestamp = match?.startTimestamp !== null && match?.startTimestamp !== undefined
+    ? match.startTimestamp + (elapsedSeconds - firstLiveTimestamp) * (match.speedFactor ?? 1)
+    : elapsedSeconds;
+  const frame = findNearestCatalogueFrame(dance.frames, Math.max(0, targetTimestamp));
+  const anchor = getPoseProjectionAnchor(detectedPose);
+
+  if (!frame?.keypoints?.length || !anchor) return null;
+
+  const keypoints = frame.keypoints.map((point) => ({
+    name: point.name,
+    x: anchor.origin.x + DEBUG_TARGET_X_OFFSET + point.x * anchor.scale * DEBUG_TARGET_SCALE,
+    y: anchor.origin.y + point.y * anchor.scale * DEBUG_TARGET_SCALE,
+    score: point.score ?? 1,
+  }));
+  const visiblePoints = keypoints.filter((point) => isVisibleKeypoint(point, 0.5));
+
+  if (visiblePoints.length === 0) return null;
+
+  const minX = Math.min(...visiblePoints.map((point) => point.x));
+  const minY = Math.min(...visiblePoints.map((point) => point.y));
+  const maxX = Math.max(...visiblePoints.map((point) => point.x));
+  const maxY = Math.max(...visiblePoints.map((point) => point.y));
+  const padding = Math.max(8, Math.min(canvas.width, canvas.height) * 0.02);
+
+  return {
+    bbox: [
+      Math.max(0, minX - padding),
+      Math.max(0, minY - padding),
+      Math.min(canvas.width, maxX + padding) - Math.max(0, minX - padding),
+      Math.min(canvas.height, maxY + padding) - Math.max(0, minY - padding),
+    ],
+    score: 1,
+    keypoints,
+  };
 }
 
 let mirrorCanvas = null;
@@ -73,6 +192,7 @@ function App() {
   const [videoName, setVideoName] = useState("");
   const [activeFeature, setActiveFeature] = useState(null);
   const [selectedDanceId, setSelectedDanceId] = useState(null);
+  const [debugTargetOverlay, setDebugTargetOverlay] = useState(false);
   const [gameState, setGameState] = useState("idle");
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
   const [sequenceSampleCount, setSequenceSampleCount] = useState(0);
@@ -443,6 +563,31 @@ function App() {
 
           const displayMatch = stabilized.stable ?? instantMatch.best;
           const precision = displayMatch ? Math.round(displayMatch.score) : 0;
+
+          if (debugTargetOverlay) {
+            const debugDanceId = displayMatch?.id ?? selectedDanceId;
+            const debugDance = catalogue.dances.find((dance) => dance.id === debugDanceId);
+            const debugPrediction = createDebugTargetPrediction(
+              debugDance,
+              displayMatch,
+              liveSequenceRef.current,
+              targetPose,
+              elapsedSeconds,
+              overlayCtx.canvas,
+            );
+
+            if (debugPrediction) {
+              renderOverlay(
+                [debugPrediction],
+                null,
+                overlayCtx,
+                "pose",
+                DEFAULT_MODEL_CONFIG.classes,
+                { pose: DEBUG_TARGET_COLORS },
+              );
+            }
+          }
+
           setDancePrecision(precision);
 
           if (displayMatch && precision >= 70) {
@@ -494,7 +639,7 @@ function App() {
         isProcessingRef.current = false;
       }
     },
-    [catalogue, countdown, prepareCountdown, pushCoachComment, selectedDanceId],
+    [catalogue, countdown, debugTargetOverlay, prepareCountdown, pushCoachComment, selectedDanceId],
   );
 
   const handleModelLoaded = useCallback((data) => {
@@ -793,6 +938,7 @@ function App() {
 
   const imageLoad = useCallback(() => {}, []);
 
+  const instantCandidates = currentMatch?.candidates ?? [];
   const shownMatch = stableMatch ?? currentMatch.best;
 
   return (
@@ -967,6 +1113,18 @@ function App() {
               </button>
             )}
           </div>
+          <label className="flex items-center justify-between gap-3 rounded-lg border border-cyan-500/20 bg-[#050818]/70 px-3 py-2">
+            <span className="flex flex-col">
+              <span className="text-sm font-bold text-slate-200">Debug pose cible</span>
+              <span className="text-xs text-slate-500">Superpose la pose attendue en cyan/rose.</span>
+            </span>
+            <input
+              type="checkbox"
+              className="h-5 w-5 accent-cyan-400"
+              checked={debugTargetOverlay}
+              onChange={(event) => setDebugTargetOverlay(event.target.checked)}
+            />
+          </label>
           {activeFeature === "video" && (
             <p className="text-xs text-slate-400 truncate">
               Source video : {videoName || "video locale"}
@@ -1141,14 +1299,14 @@ function App() {
               Candidats instantanes
             </h2>
             <div className="mt-4 flex flex-col gap-3">
-              {candidates.length === 0 ? (
+              {instantCandidates.length === 0 ? (
                 <p className="text-sm text-slate-400">
                   {gameState === "countdown"
                     ? "La comparaison commence apres le compte a rebours."
                     : "Pas encore assez de poses dans la sequence live."}
                 </p>
               ) : (
-                candidates.map((candidate) => (
+                instantCandidates.map((candidate) => (
                   <div key={candidate.id} className="flex flex-col gap-2">
                     <div className="flex justify-between gap-3 text-sm">
                       <span className="font-semibold text-slate-100 truncate">

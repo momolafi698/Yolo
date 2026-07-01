@@ -408,7 +408,9 @@ function App() {
           const elapsedSeconds = activeFeatureRef.current === "video"
             ? (videoRef.current?.currentTime ?? 0)
             : (now - sequenceStartRef.current) / 1000;
-          const sample = createPoseSample(targetPose, elapsedSeconds);
+          const sample = createPoseSample(targetPose, elapsedSeconds, {
+            mirror: activeFeatureRef.current === "camera"
+          });
 
           if (sample) {
             liveSequenceRef.current = liveSequenceRef.current

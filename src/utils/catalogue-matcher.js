@@ -81,17 +81,54 @@ export function matchPoseToCatalogue(pose, catalogue, options = {}) {
   };
 }
 
+const SWAP_PAIRS = [
+  [1, 2],   // eyes
+  [3, 4],   // ears
+  [5, 6],   // shoulders
+  [7, 8],   // elbows
+  [9, 10],  // wrists
+  [11, 12], // hips
+  [13, 14], // knees
+  [15, 16]  // ankles
+];
+
+function swapLeftRightKeypoints(keypoints) {
+  if (!keypoints) return keypoints;
+  const swapped = keypoints.map(kp => ({ ...kp }));
+  for (const [left, right] of SWAP_PAIRS) {
+    if (left < keypoints.length && right < keypoints.length) {
+      const tempX = swapped[left].x;
+      const tempY = swapped[left].y;
+      const tempScore = swapped[left].score;
+
+      swapped[left].x = swapped[right].x;
+      swapped[left].y = swapped[right].y;
+      swapped[left].score = swapped[right].score;
+
+      swapped[right].x = tempX;
+      swapped[right].y = tempY;
+      swapped[right].score = tempScore;
+    }
+  }
+  return swapped;
+}
+
 export function createPoseSample(pose, timestamp, options = {}) {
   const config = { ...DEFAULT_OPTIONS, ...options };
   if (!pose?.keypoints) return null;
 
-  const normalized = normalizeKeypoints(pose.keypoints, pose.bbox, config.keypointThreshold);
+  let keypoints = pose.keypoints;
+  if (config.mirror) {
+    keypoints = swapLeftRightKeypoints(keypoints);
+  }
+
+  const normalized = normalizeKeypoints(keypoints, pose.bbox, config.keypointThreshold);
   if (!normalized) return null;
 
   return {
     timestamp,
     keypoints: normalized,
-    angles: calculateAngles(pose.keypoints, config.keypointThreshold),
+    angles: calculateAngles(keypoints, config.keypointThreshold),
   };
 }
 

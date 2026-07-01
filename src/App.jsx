@@ -39,6 +39,8 @@ const DEFAULT_MODEL_CONFIG = {
 
 const COUNTDOWN_SECONDS = 5;
 const SEQUENCE_WINDOW_SECONDS = 4;
+const AUDIO_SYNC_OFFSET_SECONDS = 0;
+const CATALOGUE_SYNC_FPS = 30;
 const DEBUG_TARGET_COLORS = {
   bboxColor: "rgba(34, 211, 238, 0.95)",
   labelBackground: "rgba(8, 145, 178, 0.85)",
@@ -47,7 +49,7 @@ const DEBUG_TARGET_COLORS = {
   skeletonLineWidth: 3,
   label: "target",
 };
-const DEBUG_TARGET_SCALE = 0.15;
+const DEBUG_TARGET_SCALE = 0.5;
 const DEBUG_TARGET_X_OFFSET = -100;
 const POSE_KEYPOINTS = {
   leftShoulder: 5,
@@ -68,8 +70,23 @@ function getHighestScorePose(results) {
   }, results[0]);
 }
 
-function findNearestCatalogueFrame(frames, timestamp) {
+function findNearestCatalogueFrame(frames, timestamp, frameIndex = null) {
   if (!frames?.length) return null;
+
+  if (frameIndex !== null) {
+    let nearest = frames[0];
+    let nearestDistance = Math.abs((nearest.frameIndex ?? 0) - frameIndex);
+
+    for (const frame of frames) {
+      const distance = Math.abs((frame.frameIndex ?? 0) - frameIndex);
+      if (distance < nearestDistance) {
+        nearest = frame;
+        nearestDistance = distance;
+      }
+    }
+
+    return nearest;
+  }
 
   let low = 0;
   let high = frames.length - 1;
@@ -131,14 +148,34 @@ function getPoseProjectionAnchor(pose) {
   return scale ? { origin, scale } : null;
 }
 
-function createDebugTargetPrediction(dance, match, liveSequence, detectedPose, elapsedSeconds, canvas) {
+function createDebugTargetPrediction(
+  dance,
+  match,
+  liveSequence,
+  detectedPose,
+  elapsedSeconds,
+  canvas,
+  options = {},
+) {
   if (!dance?.frames?.length || !detectedPose?.keypoints || !canvas) return null;
 
   const firstLiveTimestamp = liveSequence?.[0]?.timestamp ?? elapsedSeconds;
-  const targetTimestamp = match?.startTimestamp !== null && match?.startTimestamp !== undefined
-    ? match.startTimestamp + (elapsedSeconds - firstLiveTimestamp) * (match.speedFactor ?? 1)
-    : elapsedSeconds;
-  const frame = findNearestCatalogueFrame(dance.frames, Math.max(0, targetTimestamp));
+  const targetTimestamp = options.syncToTimeline
+    ? elapsedSeconds
+    : (
+      match?.startTimestamp !== null && match?.startTimestamp !== undefined
+        ? match.startTimestamp + (elapsedSeconds - firstLiveTimestamp) * (match.speedFactor ?? 1)
+        : elapsedSeconds
+    );
+  const syncFps = dance.sampledFps || CATALOGUE_SYNC_FPS;
+  const targetFrameIndex = options.syncToTimeline
+    ? Math.round(Math.max(0, targetTimestamp) * syncFps)
+    : null;
+  const frame = findNearestCatalogueFrame(
+    dance.frames,
+    Math.max(0, targetTimestamp),
+    targetFrameIndex,
+  );
   const anchor = getPoseProjectionAnchor(detectedPose);
 
   if (!frame?.keypoints?.length || !anchor) return null;
@@ -295,6 +332,25 @@ function App() {
     setCoachComments((previous) => [message, ...previous].slice(0, 5));
   }, []);
 
+  const getSyncTimeSeconds = useCallback(() => {
+    if (activeFeatureRef.current === "camera") {
+      const audio = currentAudioRef.current;
+      if (audio && Number.isFinite(audio.currentTime)) {
+        return Math.max(0, audio.currentTime + AUDIO_SYNC_OFFSET_SECONDS);
+      }
+    }
+
+    if (activeFeatureRef.current === "video") {
+      const video = videoRef.current;
+      if (video && Number.isFinite(video.currentTime)) {
+        return Math.max(0, video.currentTime + AUDIO_SYNC_OFFSET_SECONDS);
+      }
+    }
+
+    if (!sequenceStartRef.current) return 0;
+    return Math.max(0, (performance.now() - sequenceStartRef.current) / 1000);
+  }, []);
+
   const resetLiveComparison = useCallback(() => {
     matchHistoryRef.current = [];
     liveSequenceRef.current = [];
@@ -374,6 +430,10 @@ function App() {
         }
       });
 
+      audio.addEventListener("play", () => {
+        resetLiveComparison();
+      }, { once: true });
+
       audio.addEventListener("ended", () => {
         const finalScore = danceScoreRef.current;
         const finalSampleCount = liveSequenceRef.current.length;
@@ -429,12 +489,12 @@ function App() {
         audioTimeoutRef.current = intervalId;
       });
  
+      currentAudioRef.current = audio;
       audio.play().catch((err) => {
         console.warn("Autoplay block or music play failed:", err);
       });
-      currentAudioRef.current = audio;
     }
-  }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId, prepareCountdown]);
+  }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId, prepareCountdown, resetLiveComparison]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -525,11 +585,19 @@ function App() {
             color: "text-cyan-300 font-black",
           });
         } else if (targetPose?.keypoints && catalogue && state === "detecting") {
-          const elapsedSeconds = activeFeatureRef.current === "video"
-            ? (videoRef.current?.currentTime ?? 0)
-            : (now - sequenceStartRef.current) / 1000;
+          const elapsedSeconds = getSyncTimeSeconds();
+          const selectedDance = selectedDanceId
+            ? catalogue.dances.find((dance) => dance.id === selectedDanceId)
+            : null;
+          const isTimelineSynced = Boolean(
+            selectedDance &&
+            (
+              (activeFeatureRef.current === "camera" && currentAudioRef.current) ||
+              activeFeatureRef.current === "video"
+            ),
+          );
           const sample = createPoseSample(targetPose, elapsedSeconds, {
-            mirror: activeFeatureRef.current === "camera"
+            mirror: activeFeatureRef.current === "camera",
           });
 
           if (sample) {
@@ -541,16 +609,23 @@ function App() {
             setSequenceSampleCount(liveSequenceRef.current.length);
           }
 
-          const activeCatalogue = selectedDanceId
-            ? { ...catalogue, dances: catalogue.dances.filter((d) => d.id === selectedDanceId) }
+          const activeCatalogue = selectedDance
+            ? { ...catalogue, dances: [selectedDance] }
             : catalogue;
+
+          const matchOptions = {
+            sequenceWindowSeconds: SEQUENCE_WINDOW_SECONDS,
+          };
+          if (isTimelineSynced) {
+            matchOptions.syncToTimeline = true;
+            matchOptions.speedFactors = [1];
+            matchOptions.maxTimeGapSeconds = 0.22;
+          }
 
           const instantMatch = matchPoseSequenceToCatalogue(
             liveSequenceRef.current,
             activeCatalogue,
-            {
-              sequenceWindowSeconds: SEQUENCE_WINDOW_SECONDS,
-            },
+            matchOptions,
           );
           const stabilized = stabilizeMatches(
             matchHistoryRef.current,
@@ -567,7 +642,7 @@ function App() {
           const precision = displayMatch ? Math.round(displayMatch.score) : 0;
 
           if (debugTargetOverlay) {
-            const debugDanceId = displayMatch?.id ?? selectedDanceId;
+            const debugDanceId = selectedDance?.id ?? displayMatch?.id ?? selectedDanceId;
             const debugDance = catalogue.dances.find((dance) => dance.id === debugDanceId);
             const debugPrediction = createDebugTargetPrediction(
               debugDance,
@@ -576,6 +651,7 @@ function App() {
               targetPose,
               elapsedSeconds,
               overlayCtx.canvas,
+              { syncToTimeline: isTimelineSynced },
             );
 
             if (debugPrediction) {
@@ -641,7 +717,15 @@ function App() {
         isProcessingRef.current = false;
       }
     },
-    [catalogue, countdown, debugTargetOverlay, prepareCountdown, pushCoachComment, selectedDanceId],
+    [
+      catalogue,
+      countdown,
+      debugTargetOverlay,
+      getSyncTimeSeconds,
+      prepareCountdown,
+      pushCoachComment,
+      selectedDanceId,
+    ],
   );
 
   const handleModelLoaded = useCallback((data) => {

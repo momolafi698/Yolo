@@ -270,13 +270,13 @@ function App() {
   const matchHistoryRef = useRef([]);
   const liveSequenceRef = useRef([]);
   const sequenceStartRef = useRef(0);
-  const lastScoreTimeRef = useRef(0);
   const lastCommentRef = useRef("");
   const lastCommentTimeRef = useRef(0);
   const currentAudioRef = useRef(null);
   const audioTimeoutRef = useRef(null);
   const danceScoreRef = useRef(danceScore);
   const playedDanceIdsRef = useRef([]);
+  const sessionPrecisionsRef = useRef([]);
 
   useEffect(() => {
     danceScoreRef.current = danceScore;
@@ -354,6 +354,7 @@ function App() {
   const resetLiveComparison = useCallback(() => {
     matchHistoryRef.current = [];
     liveSequenceRef.current = [];
+    sessionPrecisionsRef.current = [];
     sequenceStartRef.current = performance.now();
     setCurrentMatch({ best: null, candidates: [], detected: false, margin: 0 });
     setStableMatch(null);
@@ -438,16 +439,14 @@ function App() {
         const finalScore = danceScoreRef.current;
         const finalSampleCount = liveSequenceRef.current.length;
         
-        let rank = "D";
-        if (finalScore >= 3000) rank = "S";
-        else if (finalScore >= 1500) rank = "A";
-        else if (finalScore >= 800) rank = "B";
-        else if (finalScore >= 300) rank = "C";
+        let rank = "C";
+        if (finalScore > 60) rank = "A";
+        else if (finalScore >= 45) rank = "B";
 
         const historyEntry = {
           id: Date.now(),
           title: selectedDance.title,
-          score: finalScore,
+          score: `${finalScore}%`,
           rank: rank,
           samples: finalSampleCount,
           date: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
@@ -457,7 +456,8 @@ function App() {
 
         setLastDanceInfo({
           title: selectedDance.title,
-          score: finalScore,
+          score: `${finalScore}%`,
+          rank: rank,
         });
         setGameState("pause");
         setPauseCountdown(5);
@@ -668,28 +668,37 @@ function App() {
 
           setDancePrecision(precision);
 
-          if (displayMatch && precision >= 70) {
+          if (displayMatch) {
+            sessionPrecisionsRef.current.push(precision);
+          } else {
+            sessionPrecisionsRef.current.push(0);
+          }
+
+          const runningAvg = sessionPrecisionsRef.current.length > 0
+            ? Math.round(
+                sessionPrecisionsRef.current.reduce((a, b) => a + b, 0) /
+                  sessionPrecisionsRef.current.length
+              )
+            : 0;
+          setDanceScore(runningAvg);
+
+          if (displayMatch && precision > 60) {
             setPerformanceRating({
-              text: "MATCH",
-              color: "text-emerald-400 font-extrabold",
+              text: "RANG A",
+              color: "text-emerald-400 font-extrabold text-violet-neon",
             });
             pushCoachComment(
-              `Sequence reconnue: ${displayMatch.title} (${precision}%, ${displayMatch.matchedSamples} poses).`,
+              `Excellent ! Ressemblance > 60% (${precision}%).`,
             );
-
-            if (now - lastScoreTimeRef.current > 1200) {
-              setDanceScore((previous) => previous + precision);
-              lastScoreTimeRef.current = now;
-            }
-          } else if (displayMatch && precision >= 52) {
+          } else if (displayMatch && precision >= 45) {
             setPerformanceRating({
-              text: "PROBABLE",
+              text: "RANG B",
               color: "text-amber-300 font-bold",
             });
-            pushCoachComment(`Le mouvement ressemble a ${displayMatch.title}, continue dans le tempo.`);
+            pushCoachComment(`Bien ! Ressemblance entre 45% et 60% (${precision}%).`);
           } else {
             setPerformanceRating({
-              text: "CHERCHE",
+              text: "RANG C",
               color: "text-violet-300 font-bold animate-pulse",
             });
           }
@@ -1085,11 +1094,9 @@ function App() {
                   {lastDanceInfo.score}
                 </span>
                 <span className="text-sm font-semibold text-slate-400 mt-2">
-                  {lastDanceInfo.score >= 3000 ? "⭐ RANG S - INCROYABLE ! ⭐" :
-                   lastDanceInfo.score >= 1500 ? "🔥 RANG A - SUPER STAR ! 🔥" :
-                   lastDanceInfo.score >= 800  ? "✨ RANG B - TRÈS BIEN ! ✨" :
-                   lastDanceInfo.score >= 300  ? "👍 RANG C - BIEN JOUÉ ! 👍" :
-                                                 "🌱 RANG D - CONTINUE DE T'ENTRAÎNER ! 🌱"}
+                  {lastDanceInfo.rank === "A" ? "🔥 RANG A - SUPER STAR ! 🔥" :
+                   lastDanceInfo.rank === "B" ? "✨ RANG B - TRÈS BIEN ! ✨" :
+                                                "👍 RANG C - BIEN JOUÉ ! 👍"}
                 </span>
               </div>
 
@@ -1330,8 +1337,8 @@ function App() {
 
             <div className="grid grid-cols-2 gap-3 mt-5">
               <div className="bg-[#050818]/70 border border-violet-500/20 rounded-lg p-3">
-                <p className="text-xs text-slate-400 uppercase font-bold">Score</p>
-                <p className="text-2xl font-black text-violet-300">{danceScore}</p>
+                <p className="text-xs text-slate-400 uppercase font-bold">Score Moyen</p>
+                <p className="text-2xl font-black text-violet-300">{danceScore}%</p>
               </div>
               <div className="bg-[#050818]/70 border border-violet-500/20 rounded-lg p-3">
                 <p className="text-xs text-slate-400 uppercase font-bold">Sequence</p>

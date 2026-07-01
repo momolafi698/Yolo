@@ -43,6 +43,16 @@ To achieve the best performance using **WebGPU**, please ensure the following:
 | 📹 **Video**       |   MP4    | Offline video analysis & content review.  |
 | 📺 **Live Camera** |  Stream  | Real-time monitoring & interactive demos. |
 
+## 📥 Download Videos
+
+Create a text file with one video URL per line, then run:
+
+```bash
+npm run download:videos -- --input video-urls.txt
+```
+
+Downloads are saved to `videos/`. The downloader asks `yt-dlp` for the best 480p-or-lower format first, with fallbacks if a source does not expose that exact format.
+
 ## 📊 Model
 
 This project is fixed to **YOLO26-n**. The browser app and catalogue extractor both load YOLO26-n ONNX files from `public/models/`.

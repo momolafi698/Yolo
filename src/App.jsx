@@ -268,9 +268,9 @@ function App() {
           score: finalScore,
         });
         setGameState("pause");
-        setPauseCountdown(5);
+        setPauseCountdown(3);
 
-        let remaining = 5;
+        let remaining = 3;
         const intervalId = window.setInterval(() => {
           remaining -= 1;
           setPauseCountdown(remaining);
@@ -303,11 +303,13 @@ function App() {
   }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId, prepareCountdown]);
 
   useEffect(() => {
-    if (activeFeature === "camera") {
-      playMusicForCamera();
-    } else {
-      stopMusic();
-    }
+    queueMicrotask(() => {
+      if (activeFeature === "camera") {
+        playMusicForCamera();
+      } else {
+        stopMusic();
+      }
+    });
     return () => {
       stopMusic();
     };

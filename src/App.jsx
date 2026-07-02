@@ -610,9 +610,9 @@ function App() {
               activeFeatureRef.current === "video"
             ),
           );
-          const sample = createPoseSample(targetPose, elapsedSeconds, {
-            mirror: activeFeatureRef.current === "camera",
-          });
+          // No mirror handling here: the matcher scores both chiralities of
+          // the live window and keeps the better one.
+          const sample = createPoseSample(targetPose, elapsedSeconds);
 
           if (sample) {
             liveSequenceRef.current = liveSequenceRef.current
@@ -650,11 +650,10 @@ function App() {
           setCurrentMatch(instantMatch);
           setStableMatch(stabilized.stable);
 
-          // Only ever surface a confirmed (gated) match to the score/UI - a
-          // sub-threshold guess is deliberately not shown, so the displayed
-          // precision reflects confident detections only.
-          const displayMatch = stabilized.stable ?? (instantMatch.detected ? instantMatch.best : null);
-          const precision = displayMatch ? Math.round(displayMatch.score) : 0;
+          // The displayed precision is the live (ungated) similarity - it
+          // moves continuously with how well the player is doing. The gated
+          // `detected` flag only drives which dance title is claimed.
+          const precision = instantMatch.best ? Math.round(instantMatch.best.score) : 0;
 
           if (debugTargetOverlay) {
             const debugDanceId = selectedDance?.id ?? instantMatch.best?.id ?? selectedDanceId;
@@ -682,7 +681,10 @@ function App() {
 
           setDancePrecision(precision);
 
-          if (displayMatch) {
+          // Every scored tick counts toward the song average, including bad
+          // stretches - otherwise the final score only averaged the good
+          // moments (or stayed at 0 forever when nothing passed the gate).
+          if (instantMatch.best) {
             sessionPrecisionsRef.current.push(precision);
           }
 
@@ -694,7 +696,7 @@ function App() {
             : 0;
           setDanceScore(runningAvg);
 
-          if (displayMatch && precision > 60) {
+          if (instantMatch.best && precision > 60) {
             setPerformanceRating({
               text: "RANG A",
               color: "text-emerald-400 font-extrabold text-violet-neon",
@@ -702,7 +704,7 @@ function App() {
             pushCoachComment(
               `Excellent ! Ressemblance > 60% (${precision}%).`,
             );
-          } else if (displayMatch && precision >= 45) {
+          } else if (instantMatch.best && precision >= 45) {
             setPerformanceRating({
               text: "RANG B",
               color: "text-amber-300 font-bold",
@@ -1236,51 +1238,37 @@ function App() {
           {debugTargetOverlay && debugBreakdown && (
             <div className="rounded-lg border border-cyan-500/20 bg-[#050818]/70 px-3 py-2 flex flex-col gap-2">
               <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                Diagnostic articulations (score / distance)
+                Diagnostic segments (score / ecart en degres)
               </span>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-mono">
-                {debugBreakdown.joints.map((joint) => (
-                  <div key={joint.name} className="flex justify-between gap-2">
-                    <span className="text-slate-400 truncate">{joint.name}</span>
+                {debugBreakdown.bones.map((bone) => (
+                  <div key={bone.name} className="flex justify-between gap-2">
+                    <span className="text-slate-400 truncate">{bone.name}</span>
                     <span
                       className={
-                        joint.score === null
+                        !bone.present
                           ? "text-slate-600"
-                          : joint.score >= 70
+                          : bone.score >= 70
                             ? "text-emerald-400"
-                            : joint.score >= 40
+                            : bone.score >= 40
                               ? "text-amber-300"
                               : "text-red-400"
                       }
                     >
-                      {joint.score === null ? "n/a" : `${joint.score.toFixed(0)} (${joint.distance.toFixed(2)})`}
+                      {!bone.present ? "n/a" : `${bone.score.toFixed(0)} (${bone.thetaDeg.toFixed(0)}°)`}
                     </span>
                   </div>
                 ))}
               </div>
-              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider mt-1">
-                Angles (score / ecart en degres)
-              </span>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-mono">
-                {debugBreakdown.angles.map((angle) => (
-                  <div key={angle.name} className="flex justify-between gap-2">
-                    <span className="text-slate-400 truncate">{angle.name}</span>
-                    <span
-                      className={
-                        angle.score === null
-                          ? "text-slate-600"
-                          : angle.score >= 70
-                            ? "text-emerald-400"
-                            : angle.score >= 40
-                              ? "text-amber-300"
-                              : "text-red-400"
-                      }
-                    >
-                      {angle.score === null ? "n/a" : `${angle.score.toFixed(0)} (${angle.diff.toFixed(0)}°)`}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              {debugBreakdown.summary && (
+                <span className="text-[11px] font-mono text-slate-400">
+                  statique {debugBreakdown.summary.staticScore?.toFixed(0) ?? "n/a"} · mouvement{" "}
+                  {debugBreakdown.summary.dynamicScore === null
+                    ? "n/a"
+                    : debugBreakdown.summary.dynamicScore.toFixed(0)}{" "}
+                  · segments {debugBreakdown.summary.comparableBones}
+                </span>
+              )}
             </div>
           )}
           {activeFeature === "video" && (

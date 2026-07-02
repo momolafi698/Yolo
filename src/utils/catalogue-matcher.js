@@ -1,20 +1,5 @@
 import { bandedDtw } from "./dtw.js";
 
-const KP = {
-  leftShoulder: 5,
-  rightShoulder: 6,
-  leftElbow: 7,
-  rightElbow: 8,
-  leftWrist: 9,
-  rightWrist: 10,
-  leftHip: 11,
-  rightHip: 12,
-  leftKnee: 13,
-  rightKnee: 14,
-  leftAnkle: 15,
-  rightAnkle: 16,
-};
-
 const KEYPOINT_NAMES = [
   "nose",
   "leftEye",
@@ -35,157 +20,109 @@ const KEYPOINT_NAMES = [
   "rightAnkle",
 ];
 
-const ANGLE_NAMES = [
-  "leftElbow",
-  "rightElbow",
-  "leftShoulder",
-  "rightShoulder",
-  "leftHip",
-  "rightHip",
-  "leftKnee",
-  "rightKnee",
+const KP = Object.fromEntries(KEYPOINT_NAMES.map((name, index) => [name, index]));
+
+// A pose is represented as the DIRECTION (unit vector) of each major limb
+// segment, nothing else. Direction is invariant to where the person stands,
+// how far from the camera they are, and their body proportions (a long and a
+// short forearm pointing the same way produce the same feature) - so none of
+// those differences between the reference performer and the live player can
+// cost points. Each bone only needs its own two endpoints to be visible,
+// so a webcam that crops the legs still scores the arms instead of dropping
+// the whole frame.
+//
+// Weights express how much each segment carries choreography: arms most,
+// legs slightly less (often supporting weight rather than gesturing), torso
+// lean least.
+const BONES = [
+  { name: "torso", from: "hipMid", to: "shoulderMid", weight: 0.7 },
+  { name: "leftUpperArm", from: "leftShoulder", to: "leftElbow", weight: 1.0 },
+  { name: "rightUpperArm", from: "rightShoulder", to: "rightElbow", weight: 1.0 },
+  { name: "leftForearm", from: "leftElbow", to: "leftWrist", weight: 1.0 },
+  { name: "rightForearm", from: "rightElbow", to: "rightWrist", weight: 1.0 },
+  { name: "leftThigh", from: "leftHip", to: "leftKnee", weight: 0.9 },
+  { name: "rightThigh", from: "rightHip", to: "rightKnee", weight: 0.9 },
+  { name: "leftShin", from: "leftKnee", to: "leftAnkle", weight: 0.7 },
+  { name: "rightShin", from: "rightKnee", to: "rightAnkle", weight: 0.7 },
 ];
 
-// Per-joint tolerance tiers. Core joints (hips/shoulders) anchor the pose and
-// get a tight tolerance; extremities (wrists/ankles, plus the face points we
-// don't otherwise score) are naturally noisier - both in real dancers'
-// precision and in pose-estimation confidence - so they get more room.
-const JOINT_TIER = {
-  leftShoulder: "core",
-  rightShoulder: "core",
-  leftHip: "core",
-  rightHip: "core",
-  leftElbow: "mid",
-  rightElbow: "mid",
-  leftKnee: "mid",
-  rightKnee: "mid",
-  leftWrist: "extremity",
-  rightWrist: "extremity",
-  leftAnkle: "extremity",
-  rightAnkle: "extremity",
-  nose: "extremity",
-  leftEye: "extremity",
-  rightEye: "extremity",
-  leftEar: "extremity",
-  rightEar: "extremity",
-};
+const BONE_NAMES = BONES.map((bone) => bone.name);
 
-const ANGLE_JOINT_TIER = {
-  leftShoulder: "core",
-  rightShoulder: "core",
-  leftHip: "core",
-  rightHip: "core",
-  leftElbow: "mid",
-  rightElbow: "mid",
-  leftKnee: "mid",
-  rightKnee: "mid",
+const MIRROR_BONE = {
+  torso: "torso",
+  leftUpperArm: "rightUpperArm",
+  rightUpperArm: "leftUpperArm",
+  leftForearm: "rightForearm",
+  rightForearm: "leftForearm",
+  leftThigh: "rightThigh",
+  rightThigh: "leftThigh",
+  leftShin: "rightShin",
+  rightShin: "leftShin",
 };
 
 const DEFAULT_OPTIONS = {
-  // Minimum keypoint confidence (0-1, from the pose model) for a joint to be
-  // treated as "visible" at all - anywhere below this, the joint is skipped
-  // rather than compared. Lower it if webcam pose detection tends to report
-  // low-confidence-but-correct joints (e.g. dim lighting); raise it if you'd
-  // rather ignore shaky/noisy joints than compare against a bad estimate.
-  keypointThreshold: 0.20,
-  // How many of the 12 tracked joints must be visible (per keypointThreshold)
-  // in BOTH the live pose and the reference frame for that frame's comparison
-  // to count at all ("informative"). Below this, the frame is worth 0 and
-  // doesn't count toward score or coverage. Lower it to tolerate more
-  // occlusion/cropping (e.g. a webcam that only frames the upper body);
-  // raising it demands a fuller-body view before trusting any single frame.
-  minComparableKeypoints: 7,
-  // The final score (0-100) a dance candidate must reach to be considered
-  // "detected" at all. This is the main false-positive knob: lower it and
-  // more borderline/sloppy matches get accepted (more forgiving, but risks
-  // matching the wrong dance or a half-right move); raise it to demand a
-  // cleaner match before showing anything. Use `npm run evaluate:matcher`
-  // after changing this - it prints the cross-dance false-positive score
-  // distribution (p90/p95/p99) so you can see how close you're cutting it.
-  minConfidence: 65,
-  // Minimum number of live pose samples buffered before matching even
-  // starts. Too low and single-frame noise can trigger a match; too high
-  // delays the first score after the player starts moving. Tied to
-  // sequenceWindowSeconds and the live sampling rate (roughly, the camera's
-  // effective FPS) - don't set this above what a full window can hold.
+  // Minimum keypoint confidence (0-1, from the pose model) for a joint to
+  // participate in a bone. Below this the bone that needs it is skipped -
+  // never compared against a bad estimate.
+  keypointThreshold: 0.2,
+  // How many of the 9 bones must be measurable in BOTH the live sample and
+  // the reference frame for that comparison to count ("informative").
+  // 4 = both arms, or one arm plus torso and a leg - enough signal to score.
+  minComparableBones: 4,
+  // Minimum live samples buffered before matching starts.
   minSequenceSamples: 8,
-  // Length (seconds) of the rolling live-pose buffer matched against the
-  // catalogue each tick. Bigger = smoother/more stable scores but slower to
-  // react to a new move; smaller = more responsive but noisier frame-to-frame.
+  // Length (seconds) of the rolling live-pose window matched each tick.
   sequenceWindowSeconds: 3,
-  // Time-based coverage gate: what fraction of the live window must be
-  // backed by informative (enough visible keypoints, see
-  // minComparableKeypoints) comparisons for the match to count as detected.
-  // Lower it to tolerate more dropped/occluded frames within an otherwise
-  // decent take; raise it to require the player stay fully visible
-  // throughout the whole window.
-  minCoverageFraction: 0.5,
-  // Score-point gap required over the second-best dance candidate. Only
-  // meaningful when more than one dance is being compared at once (the
-  // video-mode fallback path) - a single pre-selected dance has no "other
-  // candidate" to be confused with. Lower it if the fallback path rejects
-  // matches that are obviously right just because two dances score close;
-  // raise it if it's flip-flopping between two similar-looking dances.
+  // Fraction of the live window that must be informative for the match to
+  // count as a confident detection. Only gates the `detected` flag (used for
+  // dance identification / rank labels) - the displayed score is never gated.
+  minCoverageFraction: 0.35,
+  // Display-score (0-100) threshold for the `detected` flag. Same caveat:
+  // this no longer hides the score, it only marks confidence.
+  minConfidence: 40,
+  // Display-score gap over the second-best dance required in multi-dance
+  // (fallback) mode for `detected`.
   minMargin: 6,
-  // Local time-warping room around the audio-clock anchor, in seconds, for
-  // the single-dance/audio-synced path. This is the direct replacement for
-  // the old rigid +/-0.22s nearest-frame snap with no warping at all - it's
-  // the main "temporal room" knob: how far off-beat (reaction lag, audio
-  // latency, natural tempo drift) a player can be while still being aligned
-  // to the right reference frame. Raise it to forgive more timing slop;
-  // lower it if the matcher seems to be "catching up" to moves from the
-  // wrong part of the song. Also consider calibrating
-  // AUDIO_SYNC_OFFSET_SECONDS in App.jsx (currently 0, uncalibrated) if
-  // there's a consistent lag/lead rather than random jitter.
-  syncBandSeconds: 0.9,
-  // Same time-warping room as syncBandSeconds, but for the fallback
-  // multi-dance search (no dance pre-selected / no audio clock) - kept
-  // tighter since this path also has to search for the right start offset,
-  // and a wide band there makes the search both slower and more likely to
-  // drift onto the wrong choreography.
+  // Local time-warping room (seconds) around the audio-clock anchor for the
+  // single-dance/audio-synced path: how far off-beat a player can be while
+  // still matched to the right reference frame.
+  syncBandSeconds: 1.0,
+  // Same, for the multi-dance fallback search (kept tighter - this path also
+  // scans start offsets, and a wide band there drifts onto wrong dances).
   fallbackBandSeconds: 0.35,
-  // How finely the fallback path scans candidate start offsets (seconds
-  // between scan points) before running the banded alignment at each one.
-  // Smaller = more thorough/slower search; larger = faster but can skip
-  // past the true starting offset entirely.
+  // Scan granularity (seconds) for fallback start offsets.
   fallbackAnchorStepSeconds: 0.3,
-  // How far (seconds, before/after the live sequence's own start time) the
-  // fallback path is willing to search for a starting offset. Raise it if
-  // players can start dancing well before/after the reference video's
-  // timeline; lower it to keep the search fast and avoid matching a
-  // coincidentally-similar moment far away in the song.
+  // How far (seconds) fallback searches for a start offset.
   fallbackTimeTolerance: 5.0,
-  // Small extra cost added for every non-diagonal (insertion/deletion) DTW
-  // step, to discourage the alignment from taking long degenerate runs
-  // (e.g. freezing on one frame) just to dodge a costly comparison. Raise it
-  // to force more diagonal (one-to-one, real-time) steps; lower it to allow
-  // more aggressive local speed-up/slow-down warping.
+  // Extra DTW cost per non-diagonal step, discouraging degenerate warps.
   stepPenalty: 0.02,
-  // Per-joint positional tolerance (Gaussian sigma, in normalized
-  // hip-to-shoulder units) - core joints (hips/shoulders) are tightest since
-  // they anchor the pose, extremities (wrists/ankles) are loosest since
-  // both real dancers' precision and pose-estimation noise are highest
-  // there. Raising these makes positional matching more forgiving, but
-  // they're the most sensitive knob for false positives - cross-dance
-  // choreography mostly differs by "how far off is each joint," so widening
-  // sigma erases that signal fast. Always re-run
-  // `npm run evaluate:matcher` after touching these; widening them from
-  // {0.12, 0.16, 0.22} to {0.16, 0.20, 0.28} alone pushed the cross-dance
-  // false-positive detection rate from 0% to ~28-59% in testing.
-  keypointSigma: { core: 0.12, mid: 0.16, extremity: 0.22 },
-  // Same idea as keypointSigma but for joint angles (degrees) instead of
-  // joint positions - core joints (shoulders/hips) tighter, elbows/knees
-  // ("mid") looser. Same false-positive sensitivity warning applies.
-  angleSigma: { core: 18, mid: 24 },
+  // Tolerance (degrees) on each bone's direction error. This is the main
+  // "how forgiving is a pose" knob. 30 deg means a bone held ~30 deg off
+  // still earns ~61% of its points; ~60 deg off earns ~14%.
+  staticSigmaDeg: 26,
+  // Motion term: bones' angular velocities (deg/s) are compared so that
+  // moving with the choreography scores and freezing during a move doesn't.
+  // Velocity is measured over velocityDeltaSeconds; the comparison tolerance
+  // is velocitySigmaDegPerSec. The term is weighted by how active the bone
+  // is (relative to activityFloorDegPerSec), so held poses aren't penalized
+  // for having no motion to compare.
+  velocityDeltaSeconds: 0.3,
+  velocitySigmaDegPerSec: 150,
+  activityFloorDegPerSec: 60,
+  // Share of the per-frame score taken by the motion term when available.
+  dynamicsWeight: 0.35,
+  // Raw similarity -> displayed percentage mapping. Raw similarity has a
+  // high floor (two random dance poses share gravity, a standing torso,
+  // legs pointing down...), so it's stretched: scoreFloor maps to 0% and
+  // scoreCeil to 100%. Calibrated with `npm run evaluate:matcher` so that
+  // cross-dance (wrong dance) raw scores land near 0-25% displayed and
+  // heavily-perturbed correct dancing lands above ~60%.
+  scoreFloor: 62,
+  scoreCeil: 94,
 };
 
 function mergeConfig(options) {
-  return {
-    ...DEFAULT_OPTIONS,
-    ...options,
-    keypointSigma: { ...DEFAULT_OPTIONS.keypointSigma, ...(options.keypointSigma ?? {}) },
-    angleSigma: { ...DEFAULT_OPTIONS.angleSigma, ...(options.angleSigma ?? {}) },
-  };
+  return { ...DEFAULT_OPTIONS, ...options };
 }
 
 export async function loadPoseCatalogue(baseUrl = "/") {
@@ -204,90 +141,65 @@ export async function loadPoseCatalogue(baseUrl = "/") {
   };
 }
 
-export function matchPoseToCatalogue(pose, catalogue, options = {}) {
-  const config = mergeConfig(options);
-  if (!pose?.keypoints || !catalogue?.dances?.length) {
-    return emptyMatch();
-  }
+// Turns one raw extracted-pose JSON (pixel-space keypoints) into the
+// in-memory shape the matcher uses: per-frame bone direction vectors plus
+// per-bone angular velocities. Pure/fetch-independent so the browser loader
+// above and the offline evaluation script share it.
+export function prepareDance(entry) {
+  const config = DEFAULT_OPTIONS;
+  const frames = entry.data.frames
+    .map((frame) => {
+      if (!frame.person?.keypoints?.length) return null;
+      const bones = extractBones(frame.person.keypoints, config.keypointThreshold);
+      if (!bones || bones.count < config.minComparableBones) return null;
+      return {
+        frameIndex: frame.frameIndex,
+        timestamp: frame.timestamp,
+        bones: bones.bones,
+        boneCount: bones.count,
+        // Hip-centered/shoulder-scaled coordinates kept only for the debug
+        // overlay tools that draw the reference stick figure.
+        keypoints: normalizePoseKeypoints(frame.person.keypoints, config.keypointThreshold),
+      };
+    })
+    .filter(Boolean);
 
-  const normalized = normalizeKeypoints(pose.keypoints, pose.bbox, config.keypointThreshold);
-  if (!normalized) return emptyMatch();
-
-  const live = {
-    keypoints: normalized,
-    angles: calculateAngles(pose.keypoints, config.keypointThreshold),
-  };
-
-  const candidates = catalogue.dances
-    .map((dance) => findBestFrame(live, dance, config))
-    .sort((a, b) => b.score - a.score);
-
-  const best = candidates[0] ?? null;
-  const second = candidates[1] ?? null;
-  const margin = best && second ? best.score - second.score : best?.score ?? 0;
+  attachVelocities(frames, config);
 
   return {
-    best,
-    candidates,
-    detected: Boolean(best && best.score >= config.minConfidence),
-    margin,
+    id: entry.id,
+    title: entry.title,
+    source: entry.source,
+    audioUrl: entry.audioUrl,
+    sampledFps: entry.sampledFps,
+    detectedFrames: entry.detectedFrames,
+    sampledFrames: entry.sampledFrames,
+    detectionRate: entry.detectionRate,
+    frames,
   };
 }
 
-const SWAP_PAIRS = [
-  [1, 2],   // eyes
-  [3, 4],   // ears
-  [5, 6],   // shoulders
-  [7, 8],   // elbows
-  [9, 10],  // wrists
-  [11, 12], // hips
-  [13, 14], // knees
-  [15, 16]  // ankles
-];
-
-function swapLeftRightKeypoints(keypoints) {
-  if (!keypoints) return keypoints;
-  const swapped = keypoints.map(kp => ({ ...kp }));
-  for (const [left, right] of SWAP_PAIRS) {
-    if (left < keypoints.length && right < keypoints.length) {
-      const tempX = swapped[left].x;
-      const tempY = swapped[left].y;
-      const tempScore = swapped[left].score;
-
-      swapped[left].x = swapped[right].x;
-      swapped[left].y = swapped[right].y;
-      swapped[left].score = swapped[right].score;
-
-      swapped[right].x = tempX;
-      swapped[right].y = tempY;
-      swapped[right].score = tempScore;
-    }
-  }
-  return swapped;
-}
-
+// Builds a live sample from one raw pose detection. Coordinates can be in
+// any consistent space (canvas pixels, letterboxed model space...) - only
+// bone directions are kept. Returns null when nothing usable is visible.
 export function createPoseSample(pose, timestamp, options = {}) {
   const config = mergeConfig(options);
-  if (!pose?.keypoints) return null;
+  if (!pose?.keypoints?.length) return null;
 
-  let keypoints = pose.keypoints;
-  if (config.mirror) {
-    keypoints = swapLeftRightKeypoints(keypoints);
-  }
-
-  const normalized = normalizeKeypoints(keypoints, pose.bbox, config.keypointThreshold);
-  if (!normalized) return null;
+  const bones = extractBones(pose.keypoints, config.keypointThreshold);
+  if (!bones || bones.count === 0) return null;
 
   return {
     timestamp,
-    keypoints: normalized,
-    angles: calculateAngles(keypoints, config.keypointThreshold),
+    bones: bones.bones,
+    boneCount: bones.count,
+    vel: null,
   };
 }
 
 export function matchPoseSequenceToCatalogue(samples, catalogue, options = {}) {
   const config = mergeConfig(options);
-  const usableSamples = samples.filter((sample) => sample?.keypoints?.length);
+  const usableSamples = samples.filter((sample) => sample?.bones);
 
   if (
     usableSamples.length < config.minSequenceSamples ||
@@ -296,8 +208,15 @@ export function matchPoseSequenceToCatalogue(samples, catalogue, options = {}) {
     return emptyMatch();
   }
 
+  attachVelocities(usableSamples, config);
+  // The mirror convention (mirrored camera preview, "mirrored" dance-cover
+  // sources, which way the player learned the routine...) is unknowable in
+  // general, so don't guess: score both chiralities of the live window and
+  // keep whichever matches better. A correct dancer always matches one.
+  const mirroredSamples = usableSamples.map(mirrorSample);
+
   const candidates = catalogue.dances
-    .map((dance) => findBestSequence(usableSamples, dance, config))
+    .map((dance) => findBestSequence(usableSamples, mirroredSamples, dance, config))
     .sort((a, b) => b.score - a.score);
 
   const best = candidates[0] ?? null;
@@ -356,84 +275,249 @@ export function stabilizeMatches(history, currentMatch, now, windowMs = 2200) {
   };
 }
 
-// Turns raw extracted-pose JSON for one dance into the in-memory shape the
-// matcher operates on. Pure/fetch-independent so it can be shared between
-// the browser catalogue loader above and offline node tooling (e.g. an
-// evaluation/calibration script) that reads the same JSON files from disk.
-//
-// Recomputes normalization from each frame's raw pixel keypoints (also
-// present in the JSON) rather than trusting the precomputed `normalized`
-// field, so catalogue (reference) poses and live poses always go through
-// the exact same normalizeKeypoints pipeline - including bone-length
-// canonicalization (see canonicalizeSkeleton below). If the two sides ever
-// drifted apart (e.g. this file's normalization changes but the
-// extract-poses.js copy that produced `normalized` doesn't), comparisons
-// would be silently wrong; recomputing here makes that impossible.
-export function prepareDance(entry) {
-  const threshold = DEFAULT_OPTIONS.keypointThreshold;
-  const frames = entry.data.frames
-    .map((frame) => {
-      if (!frame.person?.keypoints?.length) return null;
-      const keypoints = normalizeKeypoints(frame.person.keypoints, frame.person.bbox, threshold);
-      if (!keypoints) return null;
-      return {
-        frameIndex: frame.frameIndex,
-        timestamp: frame.timestamp,
-        keypoints,
-        angles: frame.person.angles ?? {},
-      };
-    })
-    .filter(Boolean);
+// ---------------------------------------------------------------------------
+// Feature extraction
+// ---------------------------------------------------------------------------
 
-  return {
-    id: entry.id,
-    title: entry.title,
-    source: entry.source,
-    audioUrl: entry.audioUrl,
-    sampledFps: entry.sampledFps,
-    detectedFrames: entry.detectedFrames,
-    sampledFrames: entry.sampledFrames,
-    detectionRate: entry.detectionRate,
-    frames,
-  };
+function visible(point, threshold) {
+  return Boolean(point) &&
+    Number.isFinite(point.x) &&
+    Number.isFinite(point.y) &&
+    (point.score ?? 0) >= threshold;
 }
 
-function findBestFrame(live, dance, config) {
-  let best = {
-    id: dance.id,
-    title: dance.title,
-    score: 0,
-    frameIndex: null,
-    timestamp: null,
-    keypointScore: 0,
-    angleScore: 0,
-    comparableKeypoints: 0,
+// Returns { bones: {name -> {x, y, w} | null}, count } where (x, y) is the
+// bone's unit direction and w its confidence weight, or null if fewer than
+// one bone is measurable.
+function extractBones(keypoints, threshold) {
+  const joint = (name) => {
+    const point = keypoints[KP[name]];
+    return visible(point, threshold) ? point : null;
   };
 
-  for (const frame of dance.frames) {
-    const comparison = compareFrame(live, frame, config);
-    if (comparison.score > best.score) {
-      best = {
-        id: dance.id,
-        title: dance.title,
-        frameIndex: frame.frameIndex,
-        timestamp: frame.timestamp,
-        ...comparison,
+  // Virtual midpoints for the torso segment. If only one hip/shoulder is
+  // visible, use it alone: the direction error this introduces is small
+  // (half a hip width over a full torso length) and beats losing the torso.
+  const virtualMid = (leftName, rightName) => {
+    const left = joint(leftName);
+    const right = joint(rightName);
+    if (left && right) {
+      return {
+        x: (left.x + right.x) / 2,
+        y: (left.y + right.y) / 2,
+        score: Math.min(left.score ?? 1, right.score ?? 1),
       };
+    }
+    return left ?? right;
+  };
+
+  const points = {};
+  for (const name of KEYPOINT_NAMES) points[name] = joint(name);
+  points.hipMid = virtualMid("leftHip", "rightHip");
+  points.shoulderMid = virtualMid("leftShoulder", "rightShoulder");
+
+  const bones = {};
+  let count = 0;
+  for (const bone of BONES) {
+    const a = points[bone.from];
+    const b = points[bone.to];
+    bones[bone.name] = null;
+    if (!a || !b) continue;
+
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const length = Math.hypot(dx, dy);
+    if (length < 1e-6) continue;
+
+    bones[bone.name] = {
+      x: dx / length,
+      y: dy / length,
+      w: Math.min(a.score ?? 1, b.score ?? 1),
+    };
+    count += 1;
+  }
+
+  if (count === 0) return null;
+  return { bones, count };
+}
+
+// Per-bone angular velocity (deg/s, signed), measured against the sample
+// roughly velocityDeltaSeconds earlier in the same sequence. Idempotent -
+// safe to re-run on a rolling buffer every tick.
+function attachVelocities(sequence, config) {
+  const delta = config.velocityDeltaSeconds;
+
+  for (let i = 0; i < sequence.length; i++) {
+    const current = sequence[i];
+    let previous = null;
+
+    for (let k = i - 1; k >= 0; k--) {
+      const gap = current.timestamp - sequence[k].timestamp;
+      if (gap > delta * 1.8) break;
+      if (gap >= delta * 0.5) previous = sequence[k];
+      if (gap >= delta) break;
+    }
+
+    if (!previous) {
+      current.vel = null;
+      continue;
+    }
+
+    const gap = current.timestamp - previous.timestamp;
+    const vel = {};
+    let any = false;
+    for (const name of BONE_NAMES) {
+      const a = previous.bones[name];
+      const b = current.bones[name];
+      if (!a || !b) {
+        vel[name] = null;
+        continue;
+      }
+      const cross = a.x * b.y - a.y * b.x;
+      const dot = a.x * b.x + a.y * b.y;
+      vel[name] = (Math.atan2(cross, dot) * (180 / Math.PI)) / gap;
+      any = true;
+    }
+
+    current.vel = any ? vel : null;
+  }
+
+  return sequence;
+}
+
+// Mirror a sample's features (swap left/right bones, negate x, flip angular
+// velocity sign) - equivalent to having mirrored the input image.
+function mirrorSample(sample) {
+  const bones = {};
+  for (const name of BONE_NAMES) {
+    const source = sample.bones[MIRROR_BONE[name]];
+    bones[name] = source ? { x: -source.x, y: source.y, w: source.w } : null;
+  }
+
+  let vel = null;
+  if (sample.vel) {
+    vel = {};
+    for (const name of BONE_NAMES) {
+      const value = sample.vel[MIRROR_BONE[name]];
+      vel[name] = value === null || value === undefined ? null : -value;
     }
   }
 
-  return best;
+  return { ...sample, bones, vel };
 }
+
+// ---------------------------------------------------------------------------
+// Frame comparison
+// ---------------------------------------------------------------------------
+
+function compareFrame(live, reference, config) {
+  const sigma = config.staticSigmaDeg;
+  const velSigma = config.velocitySigmaDegPerSec;
+
+  let staticSum = 0;
+  let staticWeight = 0;
+  let dynSum = 0;
+  let dynWeight = 0;
+  let count = 0;
+
+  for (const bone of BONES) {
+    const a = live.bones[bone.name];
+    const b = reference.bones[bone.name];
+    if (!a || !b) continue;
+
+    count += 1;
+    const dot = clamp(a.x * b.x + a.y * b.y, -1, 1);
+    const theta = Math.acos(dot) * (180 / Math.PI);
+    const weight = bone.weight * Math.min(a.w, b.w);
+    staticSum += weight * Math.exp(-(theta * theta) / (2 * sigma * sigma));
+    staticWeight += weight;
+
+    const liveVel = live.vel?.[bone.name];
+    const refVel = reference.vel?.[bone.name];
+    if (liveVel !== null && liveVel !== undefined && refVel !== null && refVel !== undefined) {
+      // A bone nobody is moving carries no rhythm information; scale the
+      // motion term by how active the bone is so held poses aren't judged
+      // on noise. A reference bone that IS moving while the player's isn't
+      // gets full activity weight - and a large velocity difference.
+      const activity = Math.min(
+        1,
+        Math.max(Math.abs(liveVel), Math.abs(refVel)) / config.activityFloorDegPerSec,
+      );
+      const diff = liveVel - refVel;
+      const velWeight = weight * activity;
+      dynSum += velWeight * Math.exp(-(diff * diff) / (2 * velSigma * velSigma));
+      dynWeight += velWeight;
+    }
+  }
+
+  if (count === 0 || staticWeight === 0) {
+    return { score: 0, staticScore: 0, dynamicScore: null, comparableBones: 0, informative: false };
+  }
+
+  const staticScore = (100 * staticSum) / staticWeight;
+  const dynamicScore = dynWeight > 0 ? (100 * dynSum) / dynWeight : null;
+  const informative = count >= config.minComparableBones;
+
+  const blended = dynamicScore === null
+    ? staticScore
+    : staticScore * (1 - config.dynamicsWeight) + dynamicScore * config.dynamicsWeight;
+
+  return {
+    score: informative ? blended : 0,
+    staticScore: round(staticScore, 1),
+    dynamicScore: dynamicScore === null ? null : round(dynamicScore, 1),
+    comparableBones: count,
+    informative,
+  };
+}
+
+// Per-bone breakdown of one live-vs-reference comparison for the debug
+// panel. Runs once per rendered frame, not in the DTW hot path.
+export function compareFrameDetailed(liveSample, referenceFrame, options = {}) {
+  const config = mergeConfig(options);
+  const sigma = config.staticSigmaDeg;
+
+  const bones = BONES.map((bone) => {
+    const a = liveSample?.bones?.[bone.name];
+    const b = referenceFrame?.bones?.[bone.name];
+    if (!a || !b) {
+      return { name: bone.name, present: false, thetaDeg: null, score: null, liveVel: null, refVel: null };
+    }
+
+    const dot = clamp(a.x * b.x + a.y * b.y, -1, 1);
+    const theta = Math.acos(dot) * (180 / Math.PI);
+    const liveVel = liveSample.vel?.[bone.name] ?? null;
+    const refVel = referenceFrame.vel?.[bone.name] ?? null;
+    return {
+      name: bone.name,
+      present: true,
+      thetaDeg: round(theta, 1),
+      score: round(100 * Math.exp(-(theta * theta) / (2 * sigma * sigma)), 1),
+      liveVel: liveVel === null ? null : round(liveVel, 0),
+      refVel: refVel === null ? null : round(refVel, 0),
+    };
+  });
+
+  return {
+    bones,
+    summary: liveSample && referenceFrame ? compareFrame(liveSample, referenceFrame, config) : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sequence alignment
+// ---------------------------------------------------------------------------
 
 function emptySequenceResult(dance) {
   return {
     id: dance.id,
     title: dance.title,
     score: 0,
+    rawScore: 0,
+    staticScore: 0,
+    dynamicScore: null,
+    mirrored: false,
     matchedSamples: 0,
-    keypointScore: 0,
-    angleScore: null,
     coverageSeconds: 0,
     informativeCoverageFraction: 0,
     alignedFrameIndex: null,
@@ -441,24 +525,24 @@ function emptySequenceResult(dance) {
   };
 }
 
-function findBestSequence(samples, dance, config) {
+function findBestSequence(samples, mirroredSamples, dance, config) {
   if (!dance.frames.length || samples.length === 0) {
     return emptySequenceResult(dance);
   }
 
-  if (config.syncToTimeline) {
-    return alignSyncedSequence(samples, dance, config);
-  }
+  const align = config.syncToTimeline ? alignSyncedSequence : alignFallbackSequence;
+  const direct = align(samples, dance, config);
+  const mirrored = align(mirroredSamples, dance, config);
 
-  return alignFallbackSequence(samples, dance, config);
+  if (mirrored.rawScore > direct.rawScore) {
+    return { ...mirrored, mirrored: true };
+  }
+  return direct;
 }
 
-// Primary path: a single dance has already been selected and the audio (or
-// video) element's clock tells us, for every live sample's timestamp,
-// approximately which reference frame it should correspond to. We still run
-// a small banded DTW rather than a rigid nearest-frame lookup, because real
-// dancers have reaction lag and micro-tempo drift relative to the track -
-// the band is exactly the "temporal room" that was previously nonexistent.
+// Primary path: a single dance is selected and the audio clock anchors every
+// live sample to a reference region; a banded DTW inside that region absorbs
+// reaction lag and local tempo drift.
 function alignSyncedSequence(samples, dance, config) {
   const sampledFps = dance.sampledFps || 30;
   const bandFrames = Math.max(1, Math.round(config.syncBandSeconds * sampledFps));
@@ -467,12 +551,8 @@ function alignSyncedSequence(samples, dance, config) {
   return runAlignment(samples, dance, config, anchorForRow, bandFrames);
 }
 
-// Fallback path: no dance has been pre-selected (video mode without a
-// manual selection), so we don't know where in the reference timeline - or
-// even which dance - the live sequence corresponds to. Coarsely scan
-// candidate start offsets (replacing the old offset x speedFactor sweep),
-// and run a banded DTW around each candidate to absorb local tempo
-// variation instead of only 3 discrete global speeds.
+// Fallback path: no dance/audio clock, so coarsely scan candidate start
+// offsets and run a banded DTW around each.
 function alignFallbackSequence(samples, dance, config) {
   const sampledFps = dance.sampledFps || 30;
   const bandFrames = Math.max(1, Math.round(config.fallbackBandSeconds * sampledFps));
@@ -492,14 +572,12 @@ function alignFallbackSequence(samples, dance, config) {
       start + (samples[i].timestamp - firstLiveTimestamp),
     );
     const result = runAlignment(samples, dance, config, anchorForRow, bandFrames);
-    if (!best || result.score > best.score) best = result;
+    if (!best || result.rawScore > best.rawScore) best = result;
   }
 
   return best ?? emptySequenceResult(dance);
 }
 
-// Shared alignment core: runs the banded DTW for one dance against one
-// anchor line, then aggregates score/coverage from the resulting path.
 function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
   const frames = dance.frames;
   const cellCache = new Map();
@@ -521,29 +599,27 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
 
   if (!alignment.path.length) return emptySequenceResult(dance);
 
-  // Collapse the path to one comparison per live sample (a live sample can
-  // appear multiple times when the path takes a horizontal - reference
-  // advances faster than the dancer - step; keep the last, which is what
-  // the alignment settled on).
+  // Collapse the path to one comparison per live sample (keep the last
+  // column the alignment settled on for rows visited more than once).
   const rowResult = new Map();
   for (const [i, j] of alignment.path) {
     rowResult.set(i, cellCache.get(i * frames.length + j));
   }
 
   let scoreSum = 0;
-  let keypointScoreSum = 0;
-  let angleScoreSum = 0;
-  let angleScoreCount = 0;
+  let staticSum = 0;
+  let dynSum = 0;
+  let dynCount = 0;
   let informativeRows = 0;
 
   for (const comparison of rowResult.values()) {
     if (!comparison?.informative) continue;
     informativeRows += 1;
     scoreSum += comparison.score;
-    keypointScoreSum += comparison.keypointScore;
-    if (comparison.angleScore !== null) {
-      angleScoreSum += comparison.angleScore;
-      angleScoreCount += 1;
+    staticSum += comparison.staticScore;
+    if (comparison.dynamicScore !== null) {
+      dynSum += comparison.dynamicScore;
+      dynCount += 1;
     }
   }
 
@@ -557,14 +633,17 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
 
   const [, lastJ] = alignment.path.at(-1);
   const alignedFrame = frames[lastJ] ?? null;
+  const rawScore = scoreSum / informativeRows;
 
   return {
     id: dance.id,
     title: dance.title,
-    score: round(scoreSum / informativeRows, 1),
+    score: toDisplayScore(rawScore, config),
+    rawScore: round(rawScore, 1),
+    staticScore: round(staticSum / informativeRows, 1),
+    dynamicScore: dynCount > 0 ? round(dynSum / dynCount, 1) : null,
+    mirrored: false,
     matchedSamples: informativeRows,
-    keypointScore: round(keypointScoreSum / informativeRows, 1),
-    angleScore: angleScoreCount > 0 ? round(angleScoreSum / angleScoreCount, 1) : null,
     coverageSeconds: round(coverageSeconds, 2),
     informativeCoverageFraction: round(informativeCoverageFraction, 3),
     alignedFrameIndex: alignedFrame?.frameIndex ?? null,
@@ -572,8 +651,15 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
   };
 }
 
-// Binary search for the reference frame whose timestamp is closest to the
-// given timestamp; used to center the DTW band on a per-row anchor.
+// Raw bone similarity has a high floor (any two humans standing under
+// gravity share most of a pose), so stretch [scoreFloor, scoreCeil] onto
+// the 0-100% the player sees.
+function toDisplayScore(raw, config) {
+  const t = (raw - config.scoreFloor) / (config.scoreCeil - config.scoreFloor);
+  return round(100 * clamp(t, 0, 1), 1);
+}
+
+// Binary search for the reference frame whose timestamp is closest.
 function nearestFrameIndex(frames, timestamp) {
   let low = 0;
   let high = frames.length - 1;
@@ -591,209 +677,48 @@ function nearestFrameIndex(frames, timestamp) {
     : low;
 }
 
-// Per-joint/per-angle breakdown for a single live-vs-reference frame pair,
-// for the debug overlay's diagnostic panel. This intentionally duplicates a
-// bit of compareKeypoints/compareAngles's looping logic rather than
-// threading a "collect details" flag through the hot per-DTW-cell
-// comparison path (compareFrame runs once per cell of the alignment search;
-// this runs once per rendered debug frame).
-export function compareFrameDetailed(liveSample, referenceFrame, options = {}) {
-  const config = mergeConfig(options);
-  const live = liveSample.keypoints;
-  const reference = referenceFrame.keypoints;
+// ---------------------------------------------------------------------------
+// Display / synthesis helpers
+// ---------------------------------------------------------------------------
 
-  const joints = [];
-  for (let i = 0; i < Math.min(live.length, reference.length); i++) {
-    const a = live[i];
-    const b = reference[i];
-    const tier = JOINT_TIER[a.name] ?? "mid";
-    const sigma = config.keypointSigma[tier];
-    const bothVisible = visible(a, config.keypointThreshold) && visible(b, config.keypointThreshold);
-    const distance = bothVisible ? Math.hypot(a.x - b.x, a.y - b.y) : null;
-    const score = distance !== null ? 100 * Math.exp(-(distance * distance) / (2 * sigma * sigma)) : null;
-    joints.push({
-      name: a.name,
-      tier,
-      visible: bothVisible,
-      distance: distance !== null ? round(distance, 3) : null,
-      score: score !== null ? round(score, 1) : null,
-    });
-  }
-
-  const angles = ANGLE_NAMES.map((name) => {
-    const liveAngle = liveSample.angles?.[name];
-    const referenceAngle = referenceFrame.angles?.[name];
-    const available = liveAngle !== null && liveAngle !== undefined &&
-      referenceAngle !== null && referenceAngle !== undefined;
-    const tier = ANGLE_JOINT_TIER[name] ?? "mid";
-    const sigma = config.angleSigma[tier];
-    const diff = available ? Math.abs(liveAngle - referenceAngle) : null;
-    const score = diff !== null ? 100 * Math.exp(-(diff * diff) / (2 * sigma * sigma)) : null;
-    return {
-      name,
-      available,
-      diff: diff !== null ? round(diff, 1) : null,
-      score: score !== null ? round(score, 1) : null,
-    };
-  });
-
-  return { joints, angles };
-}
-
-function compareFrame(live, frame, config) {
-  const pointComparison = compareKeypoints(live.keypoints, frame.keypoints, config);
-  const angleScore = compareAngles(live.angles, frame.angles, config);
-  const informative = pointComparison.count >= config.minComparableKeypoints;
-
-  if (!informative) {
-    return {
-      score: 0,
-      keypointScore: round(pointComparison.score, 1),
-      angleScore: angleScore === null ? null : round(angleScore, 1),
-      comparableKeypoints: pointComparison.count,
-      informative: false,
-    };
-  }
-
-  // Position now carries roughly the same information as angle (both are
-  // body-shape-invariant since canonicalizeSkeleton retargets every pose
-  // onto fixed bone lengths - see below), so this blend is no longer
-  // compensating for position being proportion-sensitive. Angle gets a
-  // slightly bigger share than before purely as a redundant cross-check
-  // (it's derived independently, straight from raw keypoints, so it still
-  // catches cases where canonicalization degraded to a fallback).
-  const score = angleScore === null
-    ? pointComparison.score
-    : pointComparison.score * 0.6 + angleScore * 0.4;
-
-  return {
-    score: round(score, 1),
-    keypointScore: round(pointComparison.score, 1),
-    angleScore: angleScore === null ? null : round(angleScore, 1),
-    comparableKeypoints: pointComparison.count,
-    informative: true,
-  };
-}
-
-// Per-joint Gaussian falloff, applied before aggregating. This replaces the
-// old approach of pooling every joint into one average distance and
-// applying a single linear threshold to that scalar - which made it
-// impossible to give core joints tighter tolerance than extremities, and
-// meant fixing false negatives required uniformly loosening every joint at
-// once (exactly the tuning churn this rework replaces).
-function compareKeypoints(live, reference, config) {
-  let weightedScore = 0;
-  let totalWeight = 0;
-  let count = 0;
-
-  for (let i = 0; i < Math.min(live.length, reference.length); i++) {
-    const a = live[i];
-    const b = reference[i];
-    if (!visible(a, config.keypointThreshold) || !visible(b, config.keypointThreshold)) {
-      continue;
-    }
-
-    const tier = JOINT_TIER[a.name] ?? "mid";
-    const sigma = config.keypointSigma[tier];
-    const d = Math.hypot(a.x - b.x, a.y - b.y);
-    const pointScore = 100 * Math.exp(-(d * d) / (2 * sigma * sigma));
-
-    const weight = (a.score + b.score) / 2;
-    weightedScore += pointScore * weight;
-    totalWeight += weight;
-    count += 1;
-  }
-
-  if (count === 0 || totalWeight === 0) {
-    return { score: 0, count: 0 };
-  }
-
-  return { score: weightedScore / totalWeight, count };
-}
-
-function compareAngles(liveAngles, referenceAngles, config) {
-  let scoreSum = 0;
-  let count = 0;
-
-  for (const name of ANGLE_NAMES) {
-    const live = liveAngles[name];
-    const reference = referenceAngles[name];
-    if (live === null || live === undefined || reference === null || reference === undefined) {
-      continue;
-    }
-
-    const tier = ANGLE_JOINT_TIER[name] ?? "mid";
-    const sigma = config.angleSigma[tier];
-    const diff = Math.abs(live - reference);
-    scoreSum += 100 * Math.exp(-(diff * diff) / (2 * sigma * sigma));
-    count += 1;
-  }
-
-  if (count === 0) {
-    return null;
-  }
-
-  return scoreSum / count;
-}
-
-const MIN_NORM_SCALE = 15;
-
-function normalizeKeypoints(keypoints, bbox, threshold) {
+// Hip-centered, shoulder-width-scaled keypoints. Not used for matching
+// (bone directions are) - kept for drawing reference stick figures and for
+// the evaluation script's synthetic-body generation.
+export function normalizePoseKeypoints(keypoints, threshold) {
   const leftHip = keypoints[KP.leftHip];
   const rightHip = keypoints[KP.rightHip];
   const leftShoulder = keypoints[KP.leftShoulder];
   const rightShoulder = keypoints[KP.rightShoulder];
 
-  // Both hips required for a position-invariant origin.
   if (!visible(leftHip, threshold) || !visible(rightHip, threshold)) return null;
   const origin = midpoint(leftHip, rightHip);
 
-  // Primary scale: shoulder width.
   let scale = null;
   if (visible(leftShoulder, threshold) && visible(rightShoulder, threshold)) {
-    const d = distance(leftShoulder, rightShoulder);
-    if (d >= MIN_NORM_SCALE) scale = d;
+    const d = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
+    if (d > 1e-6) scale = d;
   }
-
-  // Secondary scale: torso height.
   if (!scale) {
-    const visShoulders = [
-      visible(leftShoulder, threshold) ? leftShoulder : null,
-      visible(rightShoulder, threshold) ? rightShoulder : null,
-    ].filter(Boolean);
-    if (visShoulders.length > 0) {
-      const shoulderMid = visShoulders.length === 2
-        ? midpoint(leftShoulder, rightShoulder)
-        : visShoulders[0];
-      const torso = distance(origin, shoulderMid);
-      if (torso >= MIN_NORM_SCALE) scale = torso;
+    const shoulders = [leftShoulder, rightShoulder].filter((point) => visible(point, threshold));
+    if (shoulders.length > 0) {
+      const shoulderMid = shoulders.length === 2 ? midpoint(leftShoulder, rightShoulder) : shoulders[0];
+      const torso = Math.hypot(origin.x - shoulderMid.x, origin.y - shoulderMid.y);
+      if (torso > 1e-6) scale = torso;
     }
   }
-
   if (!scale) return null;
 
-  const normalized = keypoints.map((point, index) => ({
+  return keypoints.map((point, index) => ({
     name: point.name ?? KEYPOINT_NAMES[index],
     x: (point.x - origin.x) / scale,
     y: (point.y - origin.y) / scale,
     score: point.score,
   }));
-
-  // Translation/scale invariance alone isn't enough: two people of
-  // different build performing the identical move still land on different
-  // normalized coordinates, because a longer forearm or wider hips shows up
-  // as a bigger offset even after scaling by shoulder width. Retarget onto
-  // a fixed canonical skeleton so only each bone's measured DIRECTION
-  // (i.e. the angle it's held at) survives, not its individual length.
-  return canonicalizeSkeleton(normalized, threshold);
 }
 
-// Kinematic tree used to retarget a normalized pose onto BONE_LENGTH's fixed
-// segment lengths. Order matters: parents must appear before children, since
-// each child is placed relative to its parent's already-resolved canonical
-// position. "hipMid" is the fixed origin (0,0) from normalizeKeypoints above;
-// "shoulderMid" is a virtual joint (midpoint of the shoulders) used only to
-// anchor the torso/shoulder segments - it isn't part of the final keypoints.
+// Kinematic tree + canonical bone lengths, kept for the evaluation script:
+// retargeting a pose onto randomized lengths synthesizes "a differently
+// proportioned dancer performing the same choreography".
 const KINEMATIC_CHAIN = [
   ["hipMid", "shoulderMid", "torso"],
   ["shoulderMid", "leftShoulder", "shoulderHalf"],
@@ -810,20 +735,6 @@ const KINEMATIC_CHAIN = [
   ["rightKnee", "rightAnkle", "shin"],
 ];
 
-// Canonical bone lengths in shoulder-width units (the same unit
-// normalizeKeypoints scales everything to - "1.0" means "one shoulder
-// width"). Values come from standard anthropometric segment-length ratios
-// (fractions of total body height; see Winter's "Biomechanics and Motor
-// Control of Human Movement" segment-parameter tables), converted to
-// shoulder-width units using biacromial (shoulder) width =~ 0.259x height:
-//   upperArm 0.186/0.259, forearm 0.146/0.259, thigh 0.245/0.259,
-//   shin 0.246/0.259, torso (hip-to-shoulder) 0.288/0.259, hipHalf half of
-//   0.191/0.259 (bi-iliac hip width).
-// Exact real-world precision doesn't matter much - what matters is that
-// live and reference poses are retargeted onto the SAME lengths, so an
-// individual player's actual proportions stop being a source of mismatch.
-// Tweak a value here if a particular limb consistently reads too
-// short/long relative to how it visibly looks on screen.
 export const BONE_LENGTH = {
   torso: 1.11,
   shoulderHalf: 0.5,
@@ -835,9 +746,9 @@ export const BONE_LENGTH = {
 };
 
 function unitVector(dx, dy) {
-  const len = Math.hypot(dx, dy);
-  if (len < 1e-6) return null;
-  return { x: dx / len, y: dy / len };
+  const length = Math.hypot(dx, dy);
+  if (length < 1e-6) return null;
+  return { x: dx / length, y: dy / length };
 }
 
 function actualMidpoint(a, b, threshold) {
@@ -849,14 +760,9 @@ function actualMidpoint(a, b, threshold) {
   return null;
 }
 
-// Rebuilds a normalized pose so every bone in KINEMATIC_CHAIN has the given
-// fixed length, while keeping each bone's actual measured direction. Falls
-// back to the original (uncanonicalized) position for any joint whose
-// parent/child data is missing or whose measured bone has ~0 length (no
-// direction to preserve) - missing data degrades to the pre-canonicalization
-// behavior rather than inventing a joint from nothing. Exported (parametrized
-// by boneLengths rather than hardcoded to BONE_LENGTH) so evaluation tooling
-// can also synthesize different-proportioned bodies for testing.
+// Rebuilds a hip-centered pose so every bone has the given fixed length
+// while keeping each bone's measured direction. Expects named, hip-centered
+// keypoints (see normalizePoseKeypoints).
 export function retargetSkeleton(keypoints, boneLengths, threshold) {
   const actual = new Map(keypoints.map((point) => [point.name, point]));
   actual.set("hipMid", { x: 0, y: 0, score: 1 });
@@ -872,13 +778,13 @@ export function retargetSkeleton(keypoints, boneLengths, threshold) {
     const parentCanonical = canonical.get(parentName);
     if (!parentActual || !childActual || !parentCanonical) continue;
 
-    const dir = unitVector(childActual.x - parentActual.x, childActual.y - parentActual.y);
+    const direction = unitVector(childActual.x - parentActual.x, childActual.y - parentActual.y);
     canonical.set(
       childName,
-      dir
+      direction
         ? {
-            x: parentCanonical.x + dir.x * boneLengths[boneKey],
-            y: parentCanonical.y + dir.y * boneLengths[boneKey],
+            x: parentCanonical.x + direction.x * boneLengths[boneKey],
+            y: parentCanonical.y + direction.y * boneLengths[boneKey],
           }
         : { x: childActual.x, y: childActual.y },
     );
@@ -890,47 +796,16 @@ export function retargetSkeleton(keypoints, boneLengths, threshold) {
   });
 }
 
-function canonicalizeSkeleton(keypoints, threshold) {
-  return retargetSkeleton(keypoints, BONE_LENGTH, threshold);
-}
+// ---------------------------------------------------------------------------
+// Misc
+// ---------------------------------------------------------------------------
 
-function calculateAngles(keypoints, threshold) {
-  return {
-    leftElbow: calculateAngle(keypoints[KP.leftShoulder], keypoints[KP.leftElbow], keypoints[KP.leftWrist], threshold),
-    rightElbow: calculateAngle(keypoints[KP.rightShoulder], keypoints[KP.rightElbow], keypoints[KP.rightWrist], threshold),
-    leftShoulder: calculateAngle(keypoints[KP.leftHip], keypoints[KP.leftShoulder], keypoints[KP.leftElbow], threshold),
-    rightShoulder: calculateAngle(keypoints[KP.rightHip], keypoints[KP.rightShoulder], keypoints[KP.rightElbow], threshold),
-    leftHip: calculateAngle(keypoints[KP.leftShoulder], keypoints[KP.leftHip], keypoints[KP.leftKnee], threshold),
-    rightHip: calculateAngle(keypoints[KP.rightShoulder], keypoints[KP.rightHip], keypoints[KP.rightKnee], threshold),
-    leftKnee: calculateAngle(keypoints[KP.leftHip], keypoints[KP.leftKnee], keypoints[KP.leftAnkle], threshold),
-    rightKnee: calculateAngle(keypoints[KP.rightHip], keypoints[KP.rightKnee], keypoints[KP.rightAnkle], threshold),
-  };
-}
-
-function calculateAngle(a, b, c, threshold) {
-  if (!visible(a, threshold) || !visible(b, threshold) || !visible(c, threshold)) {
-    return null;
-  }
-
-  const ba = { x: a.x - b.x, y: a.y - b.y };
-  const bc = { x: c.x - b.x, y: c.y - b.y };
-  const angleA = Math.atan2(ba.y, ba.x);
-  const angleC = Math.atan2(bc.y, bc.x);
-  let diff = Math.abs(angleA - angleC) * (180 / Math.PI);
-  if (diff > 180) diff = 360 - diff;
-  return diff;
-}
-
-function visible(point, threshold) {
-  return point && point.score >= threshold;
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function midpoint(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-}
-
-function distance(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
 function emptyMatch() {

@@ -5,13 +5,13 @@ import { fileURLToPath } from "node:url";
 import {
   matchPoseSequenceToCatalogue,
   prepareDance,
+  createPoseSample,
+  normalizePoseKeypoints,
   retargetSkeleton,
   BONE_LENGTH,
 } from "../src/utils/catalogue-matcher.js";
 
-// Must match DEFAULT_OPTIONS.keypointThreshold in catalogue-matcher.js -
-// only used here to decide which joints count as "visible" when building a
-// synthetic body's virtual shoulder/hip midpoints.
+// Must match DEFAULT_OPTIONS.keypointThreshold in catalogue-matcher.js.
 const KEYPOINT_THRESHOLD = 0.2;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,52 +20,62 @@ const PROJECT_ROOT = path.resolve(__dirname, "..");
 const DEFAULTS = {
   catalogueDir: "public/catalogue/poses",
   windowSeconds: 3,
-  trueStepSeconds: 1,
-  falseStepSeconds: 2,
+  trueStepSeconds: 2,
+  falseStepSeconds: 4,
 };
 
-// Perturbation severities used to build synthetic "live" sequences from a
-// dance's own frames, modeling the real single-dance/audio-synced gameplay
-// path: reactionLag simulates the dancer being behind the beat, tempoAmplitude
-// simulates local (non-uniform) tempo drift, posSigma simulates per-joint
-// position noise, dropProb simulates brief keypoint occlusion.
-const SEVERITIES = {
-  none: { reactionLag: 0, tempoAmplitude: 0, posSigma: 0, dropProb: 0 },
-  low: { reactionLag: 0.08, tempoAmplitude: 0.05, posSigma: 0.015, dropProb: 0.02 },
-  medium: { reactionLag: 0.18, tempoAmplitude: 0.12, posSigma: 0.035, dropProb: 0.06 },
-  high: { reactionLag: 0.32, tempoAmplitude: 0.22, posSigma: 0.06, dropProb: 0.12 },
+// COCO left/right index pairs, for synthesizing a mirrored player.
+const SWAP_PAIRS = [
+  [1, 2], [3, 4], [5, 6], [7, 8], [9, 10], [11, 12], [13, 14], [15, 16],
+];
+
+// Perturbation scenarios applied to a dance's own RAW pixel keypoints to
+// synthesize a live webcam player, then run through the exact same
+// createPoseSample pipeline the app uses. Unlike the old harness (which
+// jittered already-normalized frames), these model the real domain gap:
+//   reactionLag  - seconds behind the beat
+//   tempoAmp     - local (sinusoidal) tempo drift amplitude, seconds
+//   posSigma     - per-keypoint Gaussian noise, as a FRACTION OF SHOULDER
+//                  WIDTH (0.05 = each joint wanders by ~5% shoulder width)
+//   dropProb     - probability a keypoint is lost (occlusion / low conf)
+//   rotDeg       - whole-body rotation, models camera tilt / lens distortion
+//   mirror       - the player follows the routine in the opposite chirality
+//   bodySigma    - per-bone length multiplier stddev (different build)
+const SCENARIOS = {
+  "true/none": {},
+  "true/low": { lag: 0.1, tempoAmp: 0.05, posSigma: 0.03, dropProb: 0.02, rotDeg: 2 },
+  "true/medium": { lag: 0.2, tempoAmp: 0.12, posSigma: 0.06, dropProb: 0.06, rotDeg: 5 },
+  "true/high": { lag: 0.35, tempoAmp: 0.22, posSigma: 0.1, dropProb: 0.12, rotDeg: 9 },
+  "true/medium+mirror": { lag: 0.2, tempoAmp: 0.12, posSigma: 0.06, dropProb: 0.06, rotDeg: 5, mirror: true },
+  "true/medium+body": { lag: 0.2, tempoAmp: 0.12, posSigma: 0.06, dropProb: 0.06, rotDeg: 5, bodySigma: 0.25 },
 };
+
+const FALSE_SCENARIO = SCENARIOS["true/low"];
 
 function printHelp() {
   console.log(`
 Evaluate the pose-matching algorithm against the real catalogue data.
 
-Computes score/detection distributions for:
-  - true-positive matches: a dance's own frames replayed against itself at
-    several injected noise severities (reaction lag, tempo drift, positional
-    jitter, occlusion) - models the primary single-dance/audio-synced path.
-  - false-positive matches: a dance's frames replayed against every other
-    dance in the catalogue - models cross-dance confusion.
-  - body-shape sensitivity: a dance's own frames retargeted onto randomized
-    synthetic-dancer bone lengths (same choreography/angles, different
-    proportions), scored both with and without the canonicalizeSkeleton
-    retargeting step - shows how much of the "different body, same dance"
-    problem that step actually fixes, instead of just asserting it does.
+Synthesizes "live webcam players" from each dance's raw extracted keypoints
+(timing lag + tempo drift + positional noise + occlusion + camera tilt +
+mirroring + different body proportions) and scores them through the same
+pipeline the app uses, both against the correct dance (true positives) and
+against every other dance (false positives / cross-dance).
 
-Re-run this after any change to matching thresholds/formulas in
-src/utils/catalogue-matcher.js to confirm true/false separation improves,
-rather than tuning against live gameplay by feel.
+Interpretation: pick staticSigmaDeg / scoreFloor / scoreCeil (DEFAULT_OPTIONS
+in src/utils/catalogue-matcher.js) so the false/cross-dance DISPLAY scores sit
+near 0-25% while true/medium-high sit comfortably above ~55%.
 
 Usage:
-  node scripts/evaluate-matcher.js
-  node scripts/evaluate-matcher.js --window 4 --true-step 0.5
+  npm run evaluate:matcher
+  node scripts/evaluate-matcher.js --window 4 --true-step 1
 
 Options:
-  --catalogue <dir>     Catalogue directory. Default: ${DEFAULTS.catalogueDir}
-  --window <seconds>    Live-sequence window length. Default: ${DEFAULTS.windowSeconds}
-  --true-step <seconds> Slide step for true-positive windows. Default: ${DEFAULTS.trueStepSeconds}
+  --catalogue <dir>      Catalogue directory. Default: ${DEFAULTS.catalogueDir}
+  --window <seconds>     Live-sequence window length. Default: ${DEFAULTS.windowSeconds}
+  --true-step <seconds>  Slide step for true-positive windows. Default: ${DEFAULTS.trueStepSeconds}
   --false-step <seconds> Slide step for false-positive windows. Default: ${DEFAULTS.falseStepSeconds}
-  --help                Show this help.
+  --help                 Show this help.
 `);
 }
 
@@ -111,7 +121,12 @@ async function loadCatalogue(catalogueDir) {
   const dances = await Promise.all(
     index.dances.map(async (entry) => {
       const data = JSON.parse(await readFile(path.join(root, entry.file), "utf8"));
-      return prepareDance({ ...entry, data });
+      return {
+        prepared: prepareDance({ ...entry, data }),
+        rawFrames: data.frames.filter((frame) => frame.person?.keypoints?.length),
+        sampledFps: entry.sampledFps || 30,
+        id: entry.id,
+      };
     }),
   );
 
@@ -138,75 +153,6 @@ function gaussianRandom(rng) {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
-function jitterKeypoints(keypoints, sigma, dropProbability, rng) {
-  if (sigma === 0 && dropProbability === 0) return keypoints;
-  return keypoints.map((point) => {
-    if (dropProbability > 0 && rng() < dropProbability) {
-      return { ...point, score: 0 };
-    }
-    if (sigma === 0) return point;
-    return {
-      ...point,
-      x: point.x + gaussianRandom(rng) * sigma,
-      y: point.y + gaussianRandom(rng) * sigma,
-    };
-  });
-}
-
-function buildPerturbedWindow(dance, startIndex, frameCount, severity, rng) {
-  const frames = dance.frames.slice(startIndex, startIndex + frameCount);
-  if (frames.length < frameCount) return null;
-
-  const baseTimestamp = frames[0].timestamp;
-  return frames.map((frame) => {
-    const tempoOffset = severity.tempoAmplitude *
-      Math.sin((2 * Math.PI * (frame.timestamp - baseTimestamp)) / 2.5);
-    return {
-      timestamp: frame.timestamp + severity.reactionLag + tempoOffset,
-      keypoints: jitterKeypoints(frame.keypoints, severity.posSigma, severity.dropProb, rng),
-      angles: frame.angles,
-    };
-  });
-}
-
-function computeTrueScores(catalogue, config, rng) {
-  const results = {};
-  for (const severityName of Object.keys(SEVERITIES)) results[severityName] = [];
-
-  for (const dance of catalogue.dances) {
-    const sampledFps = dance.sampledFps || 30;
-    const frameCount = Math.round(config.windowSeconds * sampledFps);
-    const stepFrames = Math.max(1, Math.round(config.trueStepSeconds * sampledFps));
-
-    for (let start = 0; start + frameCount <= dance.frames.length; start += stepFrames) {
-      for (const [severityName, severity] of Object.entries(SEVERITIES)) {
-        const window = buildPerturbedWindow(dance, start, frameCount, severity, rng);
-        if (!window) continue;
-
-        const match = matchPoseSequenceToCatalogue(window, { dances: [dance] }, { syncToTimeline: true });
-        if (match.best) {
-          results[severityName].push({
-            score: match.best.score,
-            detected: match.detected,
-            coverage: match.best.informativeCoverageFraction,
-          });
-        }
-      }
-    }
-  }
-
-  return results;
-}
-
-// Body-shape variance severities: each draws one fixed set of per-bone
-// length multipliers ("one synthetic dancer's proportions") and applies it
-// to every frame of the sequence - modeling a real player whose build
-// differs from the reference performer's, as opposed to SEVERITIES' frame-
-// by-frame jitter which models noise within a single body. sigma is the
-// std-dev of the per-bone length multiplier (0.15 =~ realistic adult body
-// variation, 0.35 =~ an extreme/mismatched build).
-const BODY_SHAPE_SIGMAS = { realistic: 0.15, extreme: 0.35 };
-
 function randomBodyBoneLengths(rng, sigma) {
   const lengths = {};
   for (const [bone, base] of Object.entries(BONE_LENGTH)) {
@@ -216,61 +162,127 @@ function randomBodyBoneLengths(rng, sigma) {
   return lengths;
 }
 
-// Builds a window representing a differently-proportioned dancer performing
-// the exact same choreography (same angles/directions each frame - only
-// bone lengths change). `canonicalize` toggles whether the result is
-// re-retargeted onto BONE_LENGTH afterward, i.e. whether this window went
-// through the same canonicalizeSkeleton step a real live camera pose does
-// (see normalizeKeypoints in catalogue-matcher.js) - set it false to see how
-// the matcher would have scored this exact same synthetic dancer before
-// that step existed.
-function buildBodyVariedWindow(dance, startIndex, frameCount, bodyLengths, canonicalize, rng) {
-  const frames = dance.frames.slice(startIndex, startIndex + frameCount);
-  if (frames.length < frameCount) return null;
-
-  return frames.map((frame) => {
-    const varied = retargetSkeleton(frame.keypoints, bodyLengths, KEYPOINT_THRESHOLD);
-    const jittered = jitterKeypoints(varied, SEVERITIES.low.posSigma, SEVERITIES.low.dropProb, rng);
-    const keypoints = canonicalize
-      ? retargetSkeleton(jittered, BONE_LENGTH, KEYPOINT_THRESHOLD)
-      : jittered;
-    return {
-      timestamp: frame.timestamp + SEVERITIES.low.reactionLag,
-      keypoints,
-      angles: frame.angles,
-    };
-  });
+function shoulderWidth(keypoints) {
+  const left = keypoints[5];
+  const right = keypoints[6];
+  if (!left || !right) return null;
+  const d = Math.hypot(left.x - right.x, left.y - right.y);
+  return d > 1e-6 ? d : null;
 }
 
-function computeBodyShapeScores(catalogue, config, rng) {
-  const results = {};
-  for (const sigmaName of Object.keys(BODY_SHAPE_SIGMAS)) {
-    results[`${sigmaName}/no-canonicalization`] = [];
-    results[`${sigmaName}/with-canonicalization`] = [];
+function centroid(keypoints) {
+  let x = 0;
+  let y = 0;
+  let n = 0;
+  for (const point of keypoints) {
+    if (!point) continue;
+    x += point.x;
+    y += point.y;
+    n += 1;
+  }
+  return n > 0 ? { x: x / n, y: y / n } : { x: 0, y: 0 };
+}
+
+// Synthesizes one live window from a slice of a dance's raw frames.
+// Per-window draws (fixed for the whole window, like a real player/camera):
+// body proportions, camera tilt sign. Per-frame draws: positional noise,
+// keypoint drops, tempo drift.
+function buildLiveWindow(rawFrames, startIndex, frameCount, scenario, rng) {
+  const slice = rawFrames.slice(startIndex, startIndex + frameCount);
+  if (slice.length < frameCount) return null;
+
+  const bodyLengths = scenario.bodySigma
+    ? randomBodyBoneLengths(rng, scenario.bodySigma)
+    : null;
+  const rotation = scenario.rotDeg
+    ? (rng() < 0.5 ? -1 : 1) * scenario.rotDeg * (Math.PI / 180)
+    : 0;
+  const baseTimestamp = slice[0].timestamp;
+
+  const samples = [];
+  for (const frame of slice) {
+    let keypoints = frame.person.keypoints.map((point) => ({ ...point }));
+
+    if (bodyLengths) {
+      const normalized = normalizePoseKeypoints(keypoints, KEYPOINT_THRESHOLD);
+      if (!normalized) continue;
+      keypoints = retargetSkeleton(normalized, bodyLengths, KEYPOINT_THRESHOLD);
+    }
+
+    // Positional noise scale: fraction of THIS pose's shoulder width, so the
+    // same scenario means the same relative sloppiness in pixel or
+    // normalized space.
+    const width = shoulderWidth(keypoints) ?? 1;
+    const sigma = (scenario.posSigma ?? 0) * width;
+
+    if (rotation !== 0) {
+      const center = centroid(keypoints);
+      const cos = Math.cos(rotation);
+      const sin = Math.sin(rotation);
+      keypoints = keypoints.map((point) => ({
+        ...point,
+        x: center.x + (point.x - center.x) * cos - (point.y - center.y) * sin,
+        y: center.y + (point.x - center.x) * sin + (point.y - center.y) * cos,
+      }));
+    }
+
+    keypoints = keypoints.map((point) => {
+      if ((scenario.dropProb ?? 0) > 0 && rng() < scenario.dropProb) {
+        return { ...point, score: 0 };
+      }
+      if (sigma === 0) return point;
+      return {
+        ...point,
+        x: point.x + gaussianRandom(rng) * sigma,
+        y: point.y + gaussianRandom(rng) * sigma,
+      };
+    });
+
+    if (scenario.mirror) {
+      keypoints = keypoints.map((point) => ({ ...point, x: -point.x }));
+      for (const [left, right] of SWAP_PAIRS) {
+        const tmp = keypoints[left];
+        keypoints[left] = keypoints[right];
+        keypoints[right] = tmp;
+      }
+    }
+
+    const tempoOffset = (scenario.tempoAmp ?? 0) *
+      Math.sin((2 * Math.PI * (frame.timestamp - baseTimestamp)) / 2.5);
+    const timestamp = frame.timestamp + (scenario.lag ?? 0) + tempoOffset;
+
+    const sample = createPoseSample({ keypoints }, timestamp);
+    if (sample) samples.push(sample);
   }
 
-  const BODIES_PER_DANCE = 3;
+  return samples.length >= 8 ? samples : null;
+}
+
+function computeTrueScores(catalogue, config, rng) {
+  const results = {};
+  for (const name of Object.keys(SCENARIOS)) results[name] = [];
 
   for (const dance of catalogue.dances) {
-    const sampledFps = dance.sampledFps || 30;
-    const frameCount = Math.round(config.windowSeconds * sampledFps);
-    const stepFrames = Math.max(1, Math.round(config.trueStepSeconds * 4 * sampledFps));
+    const frameCount = Math.round(config.windowSeconds * dance.sampledFps);
+    const stepFrames = Math.max(1, Math.round(config.trueStepSeconds * dance.sampledFps));
 
-    for (const [sigmaName, sigma] of Object.entries(BODY_SHAPE_SIGMAS)) {
-      for (let bodyIndex = 0; bodyIndex < BODIES_PER_DANCE; bodyIndex++) {
-        const bodyLengths = randomBodyBoneLengths(rng, sigma);
+    for (let start = 0; start + frameCount <= dance.rawFrames.length; start += stepFrames) {
+      for (const [name, scenario] of Object.entries(SCENARIOS)) {
+        const window = buildLiveWindow(dance.rawFrames, start, frameCount, scenario, rng);
+        if (!window) continue;
 
-        for (let start = 0; start + frameCount <= dance.frames.length; start += stepFrames) {
-          for (const canonicalize of [false, true]) {
-            const window = buildBodyVariedWindow(dance, start, frameCount, bodyLengths, canonicalize, rng);
-            if (!window) continue;
-
-            const match = matchPoseSequenceToCatalogue(window, { dances: [dance] }, { syncToTimeline: true });
-            if (match.best) {
-              const key = `${sigmaName}/${canonicalize ? "with" : "no"}-canonicalization`;
-              results[key].push({ score: match.best.score, detected: match.detected });
-            }
-          }
+        const match = matchPoseSequenceToCatalogue(
+          window,
+          { dances: [dance.prepared] },
+          { syncToTimeline: true },
+        );
+        if (match.best) {
+          results[name].push({
+            display: match.best.score,
+            raw: match.best.rawScore,
+            detected: match.detected,
+            mirrored: match.best.mirrored,
+          });
         }
       }
     }
@@ -283,12 +295,11 @@ function computeFalseScores(catalogue, config, rng) {
   const scores = [];
 
   for (const liveDance of catalogue.dances) {
-    const sampledFps = liveDance.sampledFps || 30;
-    const frameCount = Math.round(config.windowSeconds * sampledFps);
-    const stepFrames = Math.max(1, Math.round(config.falseStepSeconds * sampledFps));
+    const frameCount = Math.round(config.windowSeconds * liveDance.sampledFps);
+    const stepFrames = Math.max(1, Math.round(config.falseStepSeconds * liveDance.sampledFps));
 
-    for (let start = 0; start + frameCount <= liveDance.frames.length; start += stepFrames) {
-      const window = buildPerturbedWindow(liveDance, start, frameCount, SEVERITIES.low, rng);
+    for (let start = 0; start + frameCount <= liveDance.rawFrames.length; start += stepFrames) {
+      const window = buildLiveWindow(liveDance.rawFrames, start, frameCount, FALSE_SCENARIO, rng);
       if (!window) continue;
 
       for (const referenceDance of catalogue.dances) {
@@ -296,14 +307,14 @@ function computeFalseScores(catalogue, config, rng) {
 
         const match = matchPoseSequenceToCatalogue(
           window,
-          { dances: [referenceDance] },
+          { dances: [referenceDance.prepared] },
           { syncToTimeline: true },
         );
         if (match.best) {
           scores.push({
-            score: match.best.score,
+            display: match.best.score,
+            raw: match.best.rawScore,
             detected: match.detected,
-            coverage: match.best.informativeCoverageFraction,
           });
         }
       }
@@ -325,18 +336,29 @@ function formatScore(value) {
 }
 
 function summarize(label, entries) {
-  const scores = entries.map((entry) => entry.score);
+  const displays = entries.map((entry) => entry.display);
+  const raws = entries.map((entry) => entry.raw);
   const detectedRate = entries.length > 0
     ? entries.filter((entry) => entry.detected).length / entries.length
+    : 0;
+  const mirroredRate = entries.length > 0
+    ? entries.filter((entry) => entry.mirrored).length / entries.length
     : 0;
 
   console.log(`\n${label} (n=${entries.length})`);
   console.log(
-    `  p50=${formatScore(percentile(scores, 50))}  ` +
-    `p90=${formatScore(percentile(scores, 90))}  ` +
-    `p95=${formatScore(percentile(scores, 95))}  ` +
-    `p99=${formatScore(percentile(scores, 99))}  ` +
-    `detectedRate=${(detectedRate * 100).toFixed(1)}%`,
+    `  display: p10=${formatScore(percentile(displays, 10))}  ` +
+    `p50=${formatScore(percentile(displays, 50))}  ` +
+    `p90=${formatScore(percentile(displays, 90))}  ` +
+    `p99=${formatScore(percentile(displays, 99))}  ` +
+    `detected=${(detectedRate * 100).toFixed(1)}%` +
+    (mirroredRate > 0 ? `  mirroredPick=${(mirroredRate * 100).toFixed(1)}%` : ""),
+  );
+  console.log(
+    `  raw:     p10=${formatScore(percentile(raws, 10))}  ` +
+    `p50=${formatScore(percentile(raws, 50))}  ` +
+    `p90=${formatScore(percentile(raws, 90))}  ` +
+    `p99=${formatScore(percentile(raws, 99))}`,
   );
 }
 
@@ -353,33 +375,26 @@ async function main() {
 
   const rng = createRng(42);
 
-  console.log("\n=== True-positive distributions (self-replay, syncToTimeline) ===");
+  console.log("\n=== True-positive scenarios (correct dance, synthesized live player) ===");
   const trueScores = computeTrueScores(catalogue, args, rng);
-  for (const [severity, entries] of Object.entries(trueScores)) {
-    summarize(`true/${severity}`, entries);
+  for (const [name, entries] of Object.entries(trueScores)) {
+    summarize(name, entries);
   }
 
-  console.log("\n=== False-positive distribution (cross-dance, low-severity noise) ===");
+  console.log("\n=== False-positive distribution (wrong dance, low-severity player) ===");
   const falseScores = computeFalseScores(catalogue, args, rng);
   summarize("false/cross-dance", falseScores);
 
   console.log(
-    "\n=== Body-shape sensitivity (same choreography, randomized synthetic dancer proportions) ===",
-  );
-  const bodyShapeScores = computeBodyShapeScores(catalogue, args, rng);
-  for (const [label, entries] of Object.entries(bodyShapeScores)) {
-    summarize(`body-shape/${label}`, entries);
-  }
-
-  console.log(
-    "\nThresholds (minConfidence, minCoverageFraction, minMargin, syncBandSeconds, " +
-    "fallbackBandSeconds, keypointSigma, angleSigma) live in DEFAULT_OPTIONS, " +
-    "src/utils/catalogue-matcher.js. Pick them so the false-positive p90/p95 sits " +
-    "below the true-positive (medium/high severity) p10/p50, then adjust and re-run.",
+    "\nKnobs live in DEFAULT_OPTIONS, src/utils/catalogue-matcher.js: " +
+    "staticSigmaDeg (pose tolerance), dynamicsWeight/velocitySigmaDegPerSec " +
+    "(motion term), scoreFloor/scoreCeil (raw->display stretch). Aim for " +
+    "false/cross-dance display p90 well below the true/medium display p10.",
   );
 }
 
 main().catch((error) => {
   console.error(`\nEvaluation failed: ${error.message}`);
+  console.error(error.stack);
   process.exitCode = 1;
 });

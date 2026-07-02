@@ -1,95 +1,62 @@
 {
   "schemaVersion": 1,
-  "createdAt": "2026-07-02T11:46:49.455Z",
+  "createdAt": "2026-07-02T12:48:32.622Z",
   "outputDirectory": "public/catalogue/poses",
   "dances": [
     {
-      "id": "mirrored-whiplash-dance-cover-ft-lewkin-b8wqpkjrfqk",
-      "title": "[mirrored] whiplash dance cover ft. lewkin 🤍 [B8wqpkjRfQk]",
-      "file": "mirrored-whiplash-dance-cover-ft-lewkin-b8wqpkjrfqk.poses.json",
-      "source": "videos/[mirrored] whiplash dance cover ft. lewkin 🤍 [B8wqpkjRfQk].mp4",
-      "audioUrl": "/audio/mirrored-whiplash-dance-cover-ft-lewkin-b8wqpkjrfqk.mp3",
+      "id": "karisma-jenny",
+      "title": "Karisma jenny",
+      "file": "karisma-jenny.poses.json",
+      "source": "videos/Karisma jenny.mp4",
+      "audioUrl": "/audio/karisma-jenny.mp3",
       "sampledFps": 30,
-      "detectedFrames": 526,
-      "sampledFrames": 527,
-      "detectionRate": 0.9981
-    },
-    {
-      "id": "cortis-fashion-mirrored-dance-cover-cortis-fashion-tavbf5y8e2i",
-      "title": "Cortis - ‘FaSHioN’ Mirrored Dance Cover ｜ #cortis_fashion [TaVbf5y8E2I]",
-      "file": "cortis-fashion-mirrored-dance-cover-cortis-fashion-tavbf5y8e2i.poses.json",
-      "source": "videos/Cortis - ‘FaSHioN’ Mirrored Dance Cover ｜ #cortis_fashion [TaVbf5y8E2I].mp4",
-      "audioUrl": "/audio/cortis-fashion-mirrored-dance-cover-cortis-fashion-tavbf5y8e2i.mp3",
-      "sampledFps": 30,
-      "detectedFrames": 901,
-      "sampledFrames": 927,
-      "detectionRate": 0.972
-    },
-    {
-      "id": "cortis-redred-mirrored-dance-cover-cortis-redred-qdwhzcxf4t4",
-      "title": "CORTIS - ‘REDRED’ 🚨 Mirrored Dance Cover ｜ #CORTIS_REDRED [QDWHzcxF4T4]",
-      "file": "cortis-redred-mirrored-dance-cover-cortis-redred-qdwhzcxf4t4.poses.json",
-      "source": "videos/CORTIS - ‘REDRED’ 🚨 Mirrored Dance Cover ｜ #CORTIS_REDRED [QDWHzcxF4T4].mp4",
-      "audioUrl": "/audio/cortis-redred-mirrored-dance-cover-cortis-redred-qdwhzcxf4t4.mp3",
-      "sampledFps": 30,
-      "detectedFrames": 697,
-      "sampledFrames": 699,
-      "detectionRate": 0.9971
-    },
-    {
-      "id": "illit-magnetic-dance-cover-ellen-and-brian-99guhinbfhc",
-      "title": "ILLIT - ‘Magnetic' Dance Cover ｜ Ellen and Brian [99GUHINBfHc]",
-      "file": "illit-magnetic-dance-cover-ellen-and-brian-99guhinbfhc.poses.json",
-      "source": "videos/ILLIT - ‘Magnetic' Dance Cover ｜ Ellen and Brian [99GUHINBfHc].mp4",
-      "audioUrl": "/audio/illit-magnetic-dance-cover-ellen-and-brian-99guhinbfhc.mp3",
-      "sampledFps": 30,
-      "detectedFrames": 531,
-      "sampledFrames": 532,
-      "detectionRate": 0.9981
-    },
-    {
-      "id": "kai-wait-on-me-color-code-moss-green-colorpicked-by-kai-iphone-16-pro-xetelrz4d5k",
-      "title": "KAI - Wait On Me (Color Code： 💚MOSS GREEN💚) ｜ #ColorPicked by KAI ｜ iPhone 16 Pro [XeTELrZ4d5k]",
-      "file": "kai-wait-on-me-color-code-moss-green-colorpicked-by-kai-iphone-16-pro-xetelrz4d5k.poses.json",
-      "source": "videos/KAI - Wait On Me (Color Code： 💚MOSS GREEN💚) ｜ #ColorPicked by KAI ｜ iPhone 16 Pro [XeTELrZ4d5k].mp4",
-      "audioUrl": "/audio/kai-wait-on-me-color-code-moss-green-colorpicked-by-kai-iphone-16-pro-xetelrz4d5k.mp3",
-      "sampledFps": 30,
-      "detectedFrames": 886,
-      "sampledFrames": 891,
-      "detectionRate": 0.9944
-    },
-    {
-      "id": "killin-it-girl-chorus-2-bts-hybelabels-bts-kpopdancecover-jhope-jhopekillinitgirl-qvojdx8ytyo",
-      "title": "killin’ it girl chorus 2 @BTS @HYBELABELS #bts #kpopdancecover #jhope #jhopekillinitgirl [QvojDx8yTyo]",
-      "file": "killin-it-girl-chorus-2-bts-hybelabels-bts-kpopdancecover-jhope-jhopekillinitgirl-qvojdx8ytyo.poses.json",
-      "source": "videos/killin’ it girl chorus 2 @BTS @HYBELABELS #bts #kpopdancecover #jhope #jhopekillinitgirl [QvojDx8yTyo].mp4",
-      "audioUrl": "/audio/killin-it-girl-chorus-2-bts-hybelabels-bts-kpopdancecover-jhope-jhopekillinitgirl-qvojdx8ytyo.mp3",
-      "sampledFps": 30,
-      "detectedFrames": 664,
-      "sampledFrames": 665,
-      "detectionRate": 0.9985
-    },
-    {
-      "id": "like-jennie-jennierubyjane-likejennie-jennie-dance-practice-mirrored-f4pq3zfbcx0",
-      "title": "LIKE JENNIE ❤️‍🔥❤️‍🔥❤️‍🔥 @jennierubyjane #likejennie #JENNIE #dance #practice #mirrored [F4PQ3zFBCX0]",
-      "file": "like-jennie-jennierubyjane-likejennie-jennie-dance-practice-mirrored-f4pq3zfbcx0.poses.json",
-      "source": "videos/LIKE JENNIE ❤️‍🔥❤️‍🔥❤️‍🔥 @jennierubyjane #likejennie #JENNIE #dance #practice #mirrored [F4PQ3zFBCX0].mp4",
-      "audioUrl": "/audio/like-jennie-jennierubyjane-likejennie-jennie-dance-practice-mirrored-f4pq3zfbcx0.mp3",
-      "sampledFps": 30,
-      "detectedFrames": 286,
-      "sampledFrames": 287,
-      "detectionRate": 0.9965
-    },
-    {
-      "id": "allday-project-wicked-mirrored-dance-cover-byfdrjz5ngk",
-      "title": "ALLDAY PROJECT - ‘WICKED’ 🖤 Mirrored Dance Cover [bYFDRJz5nGk]",
-      "file": "allday-project-wicked-mirrored-dance-cover-byfdrjz5ngk.poses.json",
-      "source": "videos/ALLDAY PROJECT - ‘WICKED’ 🖤 Mirrored Dance Cover [bYFDRJz5nGk].mp4",
-      "audioUrl": "/audio/allday-project-wicked-mirrored-dance-cover-byfdrjz5ngk.mp3",
-      "sampledFps": 30,
-      "detectedFrames": 1011,
-      "sampledFrames": 1012,
+      "detectedFrames": 990,
+      "sampledFrames": 991,
       "detectionRate": 0.999
+    },
+    {
+      "id": "karisma-magnetic",
+      "title": "Karisma magnetic",
+      "file": "karisma-magnetic.poses.json",
+      "source": "videos/Karisma magnetic.mp4",
+      "audioUrl": "/audio/karisma-magnetic.mp3",
+      "sampledFps": 30,
+      "detectedFrames": 551,
+      "sampledFrames": 551,
+      "detectionRate": 1
+    },
+    {
+      "id": "karisma-redred",
+      "title": "Karisma REDRED",
+      "file": "karisma-redred.poses.json",
+      "source": "videos/Karisma REDRED.mp4",
+      "audioUrl": "/audio/karisma-redred.mp3",
+      "sampledFps": 30,
+      "detectedFrames": 580,
+      "sampledFrames": 581,
+      "detectionRate": 0.9983
+    },
+    {
+      "id": "karisma-whiplash",
+      "title": "Karisma whiplash",
+      "file": "karisma-whiplash.poses.json",
+      "source": "videos/Karisma whiplash.mp4",
+      "audioUrl": "/audio/karisma-whiplash.mp3",
+      "sampledFps": 30,
+      "detectedFrames": 504,
+      "sampledFrames": 504,
+      "detectionRate": 1
+    },
+    {
+      "id": "karisma-wicked",
+      "title": "Karisma wicked",
+      "file": "karisma-wicked.poses.json",
+      "source": "videos/Karisma wicked.mp4",
+      "audioUrl": "/audio/karisma-wicked.mp3",
+      "sampledFps": 30,
+      "detectedFrames": 944,
+      "sampledFrames": 944,
+      "detectionRate": 1
     }
   ]
 }

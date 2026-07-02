@@ -41,6 +41,14 @@ const COUNTDOWN_SECONDS = 5;
 const SEQUENCE_WINDOW_SECONDS = 4;
 const AUDIO_SYNC_OFFSET_SECONDS = 0;
 const CATALOGUE_SYNC_FPS = 30;
+
+const formatTime = (seconds) => {
+  if (seconds === null || seconds === undefined || isNaN(seconds)) return "--:--";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+};
+
 const DEBUG_TARGET_COLORS = {
   bboxColor: "rgba(34, 211, 238, 0.95)",
   labelBackground: "rgba(8, 145, 178, 0.85)",
@@ -439,6 +447,8 @@ function App() {
   const [pauseCountdown, setPauseCountdown] = useState(0);
   const [audioTimeLeft, setAudioTimeLeft] = useState(null);
   const [scoreHistory, setScoreHistory] = useState([]);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
   const [performanceRating, setPerformanceRating] = useState({
     text: "PRET",
     color: "text-slate-400",
@@ -457,6 +467,17 @@ function App() {
   const cameraRef = useRef(null);
   const videoRef = useRef(null);
   const cameraContainerRef = useRef(null);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === cameraContainerRef.current);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [cameraContainerRef]);
+
   const activeFeatureRef = useRef(activeFeature);
   const gameStateRef = useRef(gameState);
   const isProcessingRef = useRef(false);
@@ -1756,7 +1777,12 @@ function App() {
               {activeFeature === "camera" && (gameState === "detecting" || gameState === "countdown" || gameState === "waiting_for_person") && (
                 <div className="absolute bottom-4 left-4 right-4 z-40 flex items-center justify-between bg-black/60 backdrop-blur-md border border-fuchsia-500/30 rounded-2xl p-4 shadow-[0_0_30px_rgba(217,70,239,0.25)] gap-4 transition-all duration-300">
                   <div className="flex flex-col min-w-0 flex-1 text-left">
-                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">Chanson</span>
+                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider flex items-center gap-1.5">
+                      <span>Chanson</span>
+                      {audioTimeLeft !== null && (
+                        <span className="text-fuchsia-400 font-black animate-pulse">• {formatTime(audioTimeLeft)}</span>
+                      )}
+                    </span>
                     <span className="font-display text-base text-cyan-neon truncate font-black">
                       {selectedDanceId
                         ? catalogue?.dances?.find((d) => d.id === selectedDanceId)?.title ?? "Détection..."
@@ -1782,6 +1808,29 @@ function App() {
                   </div>
 
                   <div className="flex items-center gap-3 shrink-0">
+                    <button
+                      onClick={() => {
+                        if (document.fullscreenElement === cameraContainerRef.current) {
+                          document.exitFullscreen().catch((err) => console.warn(err));
+                        } else {
+                          cameraContainerRef.current?.requestFullscreen().catch((err) => console.warn(err));
+                        }
+                      }}
+                      className="bg-violet-600/30 hover:bg-violet-600/60 border border-violet-500/40 hover:border-violet-500/80 rounded-xl p-2 flex items-center justify-center transition-all cursor-pointer shadow-md text-white select-none mr-1"
+                      title={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
+                    >
+                      {isFullscreen ? (
+                        /* Exit fullscreen icon */
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 9h6m0 0v6m0-6L9 15m6-6l-6 6" />
+                        </svg>
+                      ) : (
+                        /* Enter fullscreen icon */
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75v4.5m0-4.5h-4.5m4.5 0L15 9m5.25 11.25v-4.5m0 4.5h-4.5m4.5 0L15 15" />
+                        </svg>
+                      )}
+                    </button>
                     <div className="bg-[#050818]/80 border border-violet-500/20 rounded-lg px-2.5 py-1 flex flex-col items-center min-w-[70px]">
                       <span className="text-[8px] text-slate-400 uppercase font-bold">Précision</span>
                       <span className="text-sm font-black text-cyan-400 font-display">

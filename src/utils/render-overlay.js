@@ -13,6 +13,7 @@ const SKELETON = [
   [6, 8],
   [7, 9],
   [8, 10],
+  // Head/face connections (0-4) removed — only the 12 body joints are shown
 ];
 
 // Keypoints indices 0-4 are head/face (nose, eyes, ears) — excluded from display

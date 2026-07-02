@@ -27,6 +27,12 @@ const ImageDisplay = memo(function ImageDisplay({
             <span className="w-2.5 h-6 bg-gradient-to-b from-fuchsia-500 to-pink-500 rounded-full inline-block"></span>
             Preview
           </h2>
+          {audioTimeLeft !== null && audioTimeLeft !== undefined && (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-fuchsia-950/40 border border-fuchsia-500/30 text-fuchsia-300 font-mono text-xs font-bold shadow-[0_0_10px_rgba(217,70,239,0.25)]">
+              <span className="w-2.5 h-2.5 rounded-full bg-fuchsia-500 animate-ping inline-block mr-0.5"></span>
+              🎵 {Math.floor(audioTimeLeft / 60)}:{(audioTimeLeft % 60).toString().padStart(2, "0")} restant
+            </div>
+          )}
         </div>
 
         {activeFeature && (

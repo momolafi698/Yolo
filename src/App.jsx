@@ -173,7 +173,8 @@ function drawPoseSkeletonOnCanvas(ctx, keypoints, scale, centerX, centerY, color
   const SKELETON = [
     [15, 13], [13, 11], [16, 14], [14, 12], [11, 12],
     [5, 11], [6, 12], [5, 6], [5, 7], [6, 8],
-    [7, 9], [8, 10]
+    [7, 9], [8, 10], [1, 2], [0, 1], [0, 2],
+    [1, 3], [2, 4], [3, 5], [4, 6]
   ];
 
   for (const [fromIdx, toIdx] of SKELETON) {
@@ -193,8 +194,7 @@ function drawPoseSkeletonOnCanvas(ctx, keypoints, scale, centerX, centerY, color
   }
 
   ctx.fillStyle = color === "rgba(6, 182, 212, 0.9)" ? "rgba(244, 114, 182, 0.95)" : color;
-  keypoints.forEach((kp, idx) => {
-    if (idx < 5) return; // Skip head/face keypoints (nose, eyes, ears)
+  for (const kp of keypoints) {
     if (kp && (kp.score === undefined || kp.score > 0.15)) {
       const proj = getCanvasCoords(kp);
       if (proj) {
@@ -203,7 +203,7 @@ function drawPoseSkeletonOnCanvas(ctx, keypoints, scale, centerX, centerY, color
         ctx.fill();
       }
     }
-  });
+  }
 }
 
 const PoseReplayCanvas = ({ frames }) => {
@@ -1452,7 +1452,6 @@ function App() {
   }, [postInferenceMessage, getSyncTimeSeconds]);
 
   const startMediaLoop = useCallback((featureName, mediaRef) => {
-    isProcessingRef.current = false;
     mediaLoopTokenRef.current += 1;
     const loopToken = mediaLoopTokenRef.current;
 
@@ -1680,14 +1679,6 @@ function App() {
               danceScore={danceScore}
               sessionPrecisions={sessionPrecisionsRef.current}
             >
-              {/* Floating remaining time overlay (visible in both normal and fullscreen modes) */}
-              {audioTimeLeft !== null && audioTimeLeft !== undefined && (
-                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-45 flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-fuchsia-500/30 text-fuchsia-300 font-mono text-sm font-bold shadow-[0_0_15px_rgba(217,70,239,0.25)] select-none">
-                  <span className="w-2 h-2 rounded-full bg-fuchsia-500 animate-ping inline-block mr-0.5"></span>
-                  🎵 {formatTime(audioTimeLeft)} restant
-                </div>
-              )}
-
               {/* Countdown HUD overlay inside the camera screen */}
               {activeFeature === "camera" && gameState === "countdown" && (
                 <div 

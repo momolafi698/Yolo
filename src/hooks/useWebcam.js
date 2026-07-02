@@ -59,6 +59,9 @@ export const useWebcam = (videoRef) => {
         });
 
         videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
+        videoRef.current.playsInline = true;
+        await videoRef.current.play().catch(() => {});
         setCameraStatus({ msg: "Camera opened successfully", color: "green" });
         return true;
       } catch (err) {
@@ -74,6 +77,9 @@ export const useWebcam = (videoRef) => {
             audio: false,
           });
           videoRef.current.srcObject = fallbackStream;
+          videoRef.current.muted = true;
+          videoRef.current.playsInline = true;
+          await videoRef.current.play().catch(() => {});
           setCameraStatus({
             msg: "Default camera opened (selected unavailable)",
             color: "green",

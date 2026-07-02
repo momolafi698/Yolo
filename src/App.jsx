@@ -599,6 +599,11 @@ function App() {
     setPoseReplayFrames([]);
   }, []);
 
+  const stopRecording = useCallback(() => {
+    shouldAnalyzeRef.current = false;
+    lastRecordedTimeRef.current = 0;
+  }, []);
+
   const prepareCountdown = useCallback(() => {
     resetLiveComparison();
     abortRecording();
@@ -826,10 +831,7 @@ function App() {
             matchOptions,
           );
 
-          const rawPrecision = instantMatch.best ? Math.round(instantMatch.best.score) : 0;
-          const precision = rawPrecision <= 20
-            ? rawPrecision
-            : Math.min(100, Math.round(20 + ((rawPrecision - 20) * 80) / 65));
+          const precision = instantMatch.best ? Math.round(instantMatch.best.score) : 0;
 
           precisePrecisions.push(precision);
 
@@ -990,6 +992,7 @@ function App() {
 
       audio.addEventListener("ended", () => {
         stopMediaLoop();
+        stopRecording();
         
         if (activeFeatureRef.current === "camera" && recordedFramesRef.current.length > 0) {
           currentDanceTitleRef.current = selectedDance.title;
@@ -1004,7 +1007,7 @@ function App() {
         console.warn("Autoplay block or music play failed:", err);
       });
     }
-  }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId, prepareCountdown, resetLiveComparison, startPauseCountdown, stopMediaLoop, runPreciseAnalysis]);
+  }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId, resetLiveComparison, startPauseCountdown, stopMediaLoop, stopRecording, runPreciseAnalysis]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -1164,10 +1167,7 @@ function App() {
           setStableMatch(stabilized.stable);
 
           const displayMatch = stabilized.stable ?? instantMatch.best;
-          const rawPrecision = displayMatch ? Math.round(displayMatch.score) : 0;
-          const precision = rawPrecision <= 20
-            ? rawPrecision
-            : Math.min(100, Math.round(20 + ((rawPrecision - 20) * 80) / 65));
+          const precision = displayMatch ? Math.round(displayMatch.score) : 0;
 
           if (debugTargetOverlay) {
             const debugDanceId = selectedDance?.id ?? displayMatch?.id ?? selectedDanceId;
@@ -1481,6 +1481,27 @@ function App() {
     startMediaLoop("camera", cameraRef);
   }, [startMediaLoop]);
 
+  const waitForCameraFrame = useCallback(async () => {
+    const video = cameraRef.current;
+    if (!video) return false;
+
+    if (video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+      await new Promise((resolve) => {
+        const done = () => {
+          video.removeEventListener("loadedmetadata", done);
+          video.removeEventListener("loadeddata", done);
+          resolve();
+        };
+        video.addEventListener("loadedmetadata", done, { once: true });
+        video.addEventListener("loadeddata", done, { once: true });
+        window.setTimeout(done, 2000);
+      });
+    }
+
+    await video.play().catch(() => {});
+    return video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0;
+  }, []);
+
   useEffect(() => {
     if (activeFeature === "camera" && (gameState === "countdown" || gameState === "detecting" || gameState === "waiting_for_person")) {
       startCameraLoop();
@@ -1566,6 +1587,7 @@ function App() {
 
   const handleVideoEnded = useCallback(() => {
     stopMediaLoop();
+    stopRecording();
     setPerformanceRating({
       text: "FIN",
       color: "text-slate-400 font-black",
@@ -1575,7 +1597,7 @@ function App() {
       currentDanceTitleRef.current = videoName || "Video Test";
       runPreciseAnalysis();
     }
-  }, [stopMediaLoop, runPreciseAnalysis, videoName]);
+  }, [stopMediaLoop, stopRecording, runPreciseAnalysis, videoName]);
 
   const toggleCamera = useCallback(async () => {
     if (activeFeature === "camera") {
@@ -1586,7 +1608,9 @@ function App() {
         overlayRef.current.height = 0;
       }
       setActiveFeature(null);
+      activeFeatureRef.current = null;
       setGameState("idle");
+      gameStateRef.current = "idle";
       setCountdown(COUNTDOWN_SECONDS);
       setSequenceSampleCount(0);
       liveSequenceRef.current = [];
@@ -1619,6 +1643,8 @@ function App() {
     const success = await openCamera(selectedDeviceId);
 
     if (success) {
+      activeFeatureRef.current = "camera";
+      gameStateRef.current = "waiting_for_person";
       setActiveFeature("camera");
       setGameState("waiting_for_person");
       setPerformanceRating({ text: "ATTENTE", color: "text-amber-500 font-bold animate-pulse" });
@@ -1628,8 +1654,13 @@ function App() {
           console.warn("Could not enter fullscreen:", err);
         });
       }
+      void waitForCameraFrame().then((ready) => {
+        if (ready && activeFeatureRef.current === "camera") {
+          startCameraLoop();
+        }
+      });
     }
-  }, [activeFeature, closeCamera, getCameras, openCamera, stopMediaLoop, stopVideo, cameraContainerRef]);
+  }, [activeFeature, closeCamera, getCameras, openCamera, stopMediaLoop, stopVideo, cameraContainerRef, startCameraLoop, waitForCameraFrame]);
 
   const handleCameraLoad = useCallback(() => {
     startCameraLoop();
@@ -1679,6 +1710,7 @@ function App() {
               danceScore={danceScore}
               sessionPrecisions={sessionPrecisionsRef.current}
             >
+
               {/* Countdown HUD overlay inside the camera screen */}
               {activeFeature === "camera" && gameState === "countdown" && (
                 <div 
@@ -1788,18 +1820,9 @@ function App() {
                   </div>
 
                   <div className="flex-1 max-w-xs flex flex-col gap-2 items-center">
-                    <div className="flex items-center gap-2 justify-center">
-                      <span className="text-xs uppercase font-extrabold text-slate-400 tracking-wider">
-                        Durée :
-                      </span>
-                      {audioTimeLeft !== null ? (
-                        <span className="text-2xl md:text-3xl font-black text-fuchsia-400 font-display animate-pulse drop-shadow-[0_0_10px_rgba(217,70,239,0.6)]">
-                          {formatTime(audioTimeLeft)}
-                        </span>
-                      ) : (
-                        <span className="text-slate-500 font-display text-sm">--:--</span>
-                      )}
-                    </div>
+                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">
+                      Évolution
+                    </span>
                     <div className="flex items-end gap-0.5 h-14 w-full bg-black/40 rounded-lg p-1.5 overflow-hidden justify-center shadow-inner">
                       {sessionPrecisionsRef.current.slice(-25).map((p, idx) => (
                         <div
@@ -1815,7 +1838,20 @@ function App() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3.5 shrink-0">
+                  <div className="flex items-center gap-6 shrink-0">
+                    {audioTimeLeft !== null ? (
+                      <div className="flex flex-col items-center justify-center mr-2 text-right">
+                        <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider mb-1">Durée Restante</span>
+                        <span className="text-2xl md:text-3xl font-black text-fuchsia-400 font-display animate-pulse drop-shadow-[0_0_10px_rgba(217,70,239,0.6)]">
+                          {formatTime(audioTimeLeft)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center mr-2 text-right">
+                        <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider mb-1">Durée Restante</span>
+                        <span className="text-slate-500 font-display text-lg">--:--</span>
+                      </div>
+                    )}
                     <button
                       onClick={() => {
                         if (document.fullscreenElement === cameraContainerRef.current) {
@@ -1824,7 +1860,7 @@ function App() {
                           cameraContainerRef.current?.requestFullscreen().catch((err) => console.warn(err));
                         }
                       }}
-                      className="bg-violet-600/30 hover:bg-violet-600/60 border border-violet-500/40 hover:border-violet-500/80 rounded-xl p-3 flex items-center justify-center transition-all cursor-pointer shadow-md text-white select-none mr-1.5"
+                      className="bg-violet-600/30 hover:bg-violet-600/60 border border-violet-500/40 hover:border-violet-500/80 rounded-xl p-3 flex items-center justify-center transition-all cursor-pointer shadow-md text-white select-none"
                       title={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
                     >
                       {isFullscreen ? (
@@ -1839,18 +1875,6 @@ function App() {
                         </svg>
                       )}
                     </button>
-                    <div className="bg-[#050818]/80 border border-violet-500/20 rounded-lg px-5 py-2.5 flex flex-col items-center min-w-[110px]">
-                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Précision</span>
-                      <span className="text-xl md:text-2xl font-black text-cyan-400 font-display">
-                        {Math.round(dancePrecision)}%
-                      </span>
-                    </div>
-                    <div className="bg-[#050818]/80 border border-violet-500/20 rounded-lg px-5 py-2.5 flex flex-col items-center min-w-[110px]">
-                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Score</span>
-                      <span className="text-xl md:text-2xl font-black text-fuchsia-400 font-display">
-                        {danceScore}%
-                      </span>
-                    </div>
                   </div>
                 </div>
               )}

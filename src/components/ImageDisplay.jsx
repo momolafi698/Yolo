@@ -15,7 +15,6 @@ const ImageDisplay = memo(function ImageDisplay({
   onVideoEnded,
   onImageLoad,
   activeFeature,
-  audioTimeLeft,
   cameraContainerRef,
   children,
 }) {

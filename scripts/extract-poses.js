@@ -418,13 +418,79 @@ function calculateIou(a, b) {
   return union > 0 ? intersection / union : 0;
 }
 
-function pickBestPerson(detections) {
+// Mean confidence of the detection's most reliable keypoints - a good proxy
+// for "is this actually a person with visible limbs" (spurious detections
+// have a decent box score but garbage keypoints).
+function meanTopKeypointScore(detection, top = 9) {
+  const scores = detection.keypoints
+    .map((point) => point.score)
+    .sort((a, b) => b - a)
+    .slice(0, top);
+  return scores.reduce((sum, s) => sum + s, 0) / scores.length;
+}
+
+// Picks the dancer among this frame's detections. The old implementation
+// took the LARGEST bbox, so any oversized spurious detection (a common
+// failure mode: a low-quality box covering most of the frame) beat the real
+// person and injected wild keypoints into the catalogue. Rank instead by
+// detection confidence + keypoint quality + continuity with the previously
+// tracked person, after discarding implausible boxes.
+function pickBestPerson(detections, previous, videoMeta) {
   if (!detections.length) return null;
-  return detections.reduce((best, current) => {
-    const bestArea = best.bbox[2] * best.bbox[3];
-    const currentArea = current.bbox[2] * current.bbox[3];
-    return currentArea > bestArea ? current : best;
+
+  const frameArea = videoMeta.width * videoMeta.height;
+  const plausible = detections.filter((detection) => {
+    const [, , w, h] = detection.bbox;
+    if (w * h > frameArea * 0.9) return false; // whole-frame false positive
+    if (w < 8 || h < 16) return false; // speck
+    return meanTopKeypointScore(detection) >= 0.25;
   });
+  if (!plausible.length) return null;
+
+  const rank = (detection) =>
+    detection.score +
+    0.5 * meanTopKeypointScore(detection) +
+    (previous ? 0.5 * calculateIou(previous.bbox, detection.bbox) : 0);
+
+  return plausible.reduce((best, current) => (rank(current) > rank(best) ? current : best));
+}
+
+function bboxCenter(bbox) {
+  return { x: bbox[0] + bbox[2] / 2, y: bbox[1] + bbox[3] / 2 };
+}
+
+// Removes single-frame "teleports": frames where the tracked person jumps
+// far away from BOTH temporal neighbors while the neighbors agree with each
+// other (i.e. the glitch is this frame, not a camera cut). Those frames are
+// wrong-person/garbage detections; better a hole (the matcher skips it)
+// than a poisoned pose.
+function suppressTeleports(frames) {
+  let suppressed = 0;
+  for (let i = 1; i < frames.length - 1; i++) {
+    const prev = frames[i - 1]?.person;
+    const cur = frames[i]?.person;
+    const next = frames[i + 1]?.person;
+    if (!prev || !cur || !next) continue;
+
+    const scale = Math.max(
+      Math.hypot(cur.bbox[2], cur.bbox[3]),
+      Math.hypot(prev.bbox[2], prev.bbox[3]),
+    );
+    if (scale <= 0) continue;
+
+    const centerPrev = bboxCenter(prev.bbox);
+    const centerCur = bboxCenter(cur.bbox);
+    const centerNext = bboxCenter(next.bbox);
+    const dPrev = Math.hypot(centerCur.x - centerPrev.x, centerCur.y - centerPrev.y) / scale;
+    const dNext = Math.hypot(centerCur.x - centerNext.x, centerCur.y - centerNext.y) / scale;
+    const dNeighbors = Math.hypot(centerNext.x - centerPrev.x, centerNext.y - centerPrev.y) / scale;
+
+    if (dPrev > 0.45 && dNext > 0.45 && dNeighbors < 0.45) {
+      frames[i] = { ...frames[i], person: null };
+      suppressed += 1;
+    }
+  }
+  return suppressed;
 }
 
 function distance(a, b) {
@@ -584,6 +650,7 @@ async function extractVideo(videoPath, session, options) {
   });
 
   let frameIndex = 0;
+  let trackedPerson = null;
   try {
     for await (const frame of fixedChunks(ffmpeg.stdout, frameSize)) {
       if (frameIndex >= options.maxFrames) {
@@ -595,7 +662,9 @@ async function extractVideo(videoPath, session, options) {
       const outputs = await session.run({ images: inputTensor });
       const outputTensor = outputs[session.outputNames[0]];
       const detections = postProcessPose(outputTensor, options, videoMeta, letterbox);
-      const bestPerson = enrichDetection(pickBestPerson(detections), options);
+      const pickedPerson = pickBestPerson(detections, trackedPerson, videoMeta);
+      if (pickedPerson) trackedPerson = pickedPerson;
+      const bestPerson = enrichDetection(pickedPerson, options);
 
       inputTensor.dispose?.();
       for (const tensor of Object.values(outputs)) {
@@ -626,6 +695,11 @@ async function extractVideo(videoPath, session, options) {
   }
 
   process.stdout.write(`\r  processed ${frameIndex} sampled frames\n`);
+
+  const suppressedFrames = suppressTeleports(frames);
+  if (suppressedFrames > 0) {
+    console.log(`  suppressed ${suppressedFrames} teleporting detection(s)`);
+  }
 
   const detectedFrames = frames.filter((frame) => frame.person).length;
   return {

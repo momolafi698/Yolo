@@ -35,7 +35,9 @@ const KP = Object.fromEntries(KEYPOINT_NAMES.map((name, index) => [name, index])
 // legs slightly less (often supporting weight rather than gesturing), torso
 // lean least.
 const BONES = [
-  { name: "torso", from: "hipMid", to: "shoulderMid", weight: 0.7 },
+  // Torso is deliberately low-weight: it mostly points up on everyone, so it
+  // says little about the choreography - arms and legs carry the score.
+  { name: "torso", from: "hipMid", to: "shoulderMid", weight: 0.3 },
   { name: "leftUpperArm", from: "leftShoulder", to: "leftElbow", weight: 1.0 },
   { name: "rightUpperArm", from: "rightShoulder", to: "rightElbow", weight: 1.0 },
   { name: "leftForearm", from: "leftElbow", to: "leftWrist", weight: 1.0 },
@@ -153,13 +155,14 @@ const DEFAULT_OPTIONS = {
   // is (relative to activityFloorDegPerSec), so held poses aren't penalized
   // for having no motion to compare.
   velocityDeltaSeconds: 0.3,
-  velocitySigmaDegPerSec: 80,
+  // Loose-ish on purpose: live webcam keypoints jitter, and differentiating
+  // jittery positions inflates velocity error even for a perfect dancer.
+  // The anti-idle work is mostly done by the sequence-level motion-ratio
+  // penalty and the informativeness weighting, not by this per-frame term.
+  velocitySigmaDegPerSec: 110,
   activityFloorDegPerSec: 45,
   // Share of the per-frame score taken by the motion term when available.
-  // Kept high on purpose: static bone directions share a lot between ANY
-  // two humans (gravity), so rhythm/motion is where standing still and
-  // dancing actually separate.
-  dynamicsWeight: 0.45,
+  dynamicsWeight: 0.4,
   // Reference-bone informativeness (see attachInformativeness): a bone at
   // rest and not moving only counts restingBoneWeight; full weight is
   // reached at informativeDeviationDeg away from rest (or when moving).
@@ -204,13 +207,70 @@ export async function loadPoseCatalogue(baseUrl = "/") {
   };
 }
 
+// Load-time cleanup of extracted pose data. Older catalogues were extracted
+// with a "largest bbox wins" person picker, which sometimes captured a
+// spurious whole-frame detection with wild keypoints; those frames poison
+// both the static comparison and (worse) the reference motion statistics.
+// Drops: whole-frame bboxes, detections with garbage keypoint confidence,
+// and single-frame "teleports" where the person jumps far from BOTH
+// temporal neighbors while the neighbors agree with each other.
+function sanitizeRawFrames(rawFrames, source) {
+  const frameArea = source?.width && source?.height ? source.width * source.height : null;
+
+  const frames = rawFrames.map((frame) => {
+    const person = frame.person;
+    if (!person?.keypoints?.length) return { ...frame, person: null };
+
+    const bbox = person.bbox;
+    if (frameArea && bbox?.length === 4 && bbox[2] * bbox[3] > frameArea * 0.9) {
+      return { ...frame, person: null };
+    }
+
+    const topScores = person.keypoints
+      .map((point) => point.score ?? 0)
+      .sort((a, b) => b - a)
+      .slice(0, 9);
+    const meanTop = topScores.reduce((sum, s) => sum + s, 0) / topScores.length;
+    if (meanTop < 0.25) return { ...frame, person: null };
+
+    return frame;
+  });
+
+  const center = (bbox) => ({ x: bbox[0] + bbox[2] / 2, y: bbox[1] + bbox[3] / 2 });
+  for (let i = 1; i < frames.length - 1; i++) {
+    const prev = frames[i - 1]?.person;
+    const cur = frames[i]?.person;
+    const next = frames[i + 1]?.person;
+    if (!prev?.bbox || !cur?.bbox || !next?.bbox) continue;
+
+    const scale = Math.max(
+      Math.hypot(cur.bbox[2], cur.bbox[3]),
+      Math.hypot(prev.bbox[2], prev.bbox[3]),
+    );
+    if (scale <= 0) continue;
+
+    const cPrev = center(prev.bbox);
+    const cCur = center(cur.bbox);
+    const cNext = center(next.bbox);
+    const dPrev = Math.hypot(cCur.x - cPrev.x, cCur.y - cPrev.y) / scale;
+    const dNext = Math.hypot(cCur.x - cNext.x, cCur.y - cNext.y) / scale;
+    const dNeighbors = Math.hypot(cNext.x - cPrev.x, cNext.y - cPrev.y) / scale;
+
+    if (dPrev > 0.45 && dNext > 0.45 && dNeighbors < 0.45) {
+      frames[i] = { ...frames[i], person: null };
+    }
+  }
+
+  return frames;
+}
+
 // Turns one raw extracted-pose JSON (pixel-space keypoints) into the
 // in-memory shape the matcher uses: per-frame bone direction vectors plus
 // per-bone angular velocities. Pure/fetch-independent so the browser loader
 // above and the offline evaluation script share it.
 export function prepareDance(entry) {
   const config = DEFAULT_OPTIONS;
-  const frames = entry.data.frames
+  const frames = sanitizeRawFrames(entry.data.frames, entry.data.source)
     .map((frame) => {
       if (!frame.person?.keypoints?.length) return null;
       const bones = extractBones(frame.person.keypoints, config.keypointThreshold);
@@ -693,9 +753,8 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
   let dynSum = 0;
   let dynCount = 0;
   let informativeRows = 0;
-  let liveMotionSum = 0;
-  let refMotionSum = 0;
-  let motionRows = 0;
+  const liveMotions = [];
+  const refMotions = [];
 
   for (const comparison of rowResult.values()) {
     if (!comparison?.informative) continue;
@@ -707,9 +766,8 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
       dynCount += 1;
     }
     if (comparison.liveMotion !== null) {
-      liveMotionSum += comparison.liveMotion;
-      refMotionSum += comparison.refMotion;
-      motionRows += 1;
+      liveMotions.push(comparison.liveMotion);
+      refMotions.push(comparison.refMotion);
     }
   }
 
@@ -726,13 +784,15 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
   const rawScore = scoreSum / informativeRows;
 
   // Anti-idle: how much did the player actually move, relative to what the
-  // choreography demanded over this window?
+  // choreography demanded over this window? Medians, not means - a single
+  // glitchy frame (bad extraction, keypoint teleport) produces a velocity
+  // spike that would otherwise dominate the ratio.
   let motionRatio = null;
   let motionPenalty = 1;
-  if (motionRows > 0) {
-    const refMotionMean = refMotionSum / motionRows;
-    if (refMotionMean >= config.motionPenaltyMinRefDegPerSec) {
-      motionRatio = (liveMotionSum / motionRows) / refMotionMean;
+  if (refMotions.length > 0) {
+    const refMotionMedian = median(refMotions);
+    if (refMotionMedian >= config.motionPenaltyMinRefDegPerSec) {
+      motionRatio = median(liveMotions) / refMotionMedian;
       motionPenalty = clamp(motionRatio / config.motionRatioFloor, 0, 1);
     }
   }

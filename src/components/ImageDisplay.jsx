@@ -16,6 +16,8 @@ const ImageDisplay = memo(function ImageDisplay({
   onImageLoad,
   activeFeature,
   audioTimeLeft,
+  cameraContainerRef,
+  children,
 }) {
   return (
     <div className="container p-5 mb-6 relative min-h-[400px] flex flex-col">
@@ -77,7 +79,7 @@ const ImageDisplay = memo(function ImageDisplay({
         )}
 
         <div className="relative w-full h-full flex items-center justify-center" hidden={activeFeature === null}>
-          <div className="relative w-full max-h-[600px] flex items-center justify-center">
+          <div ref={cameraContainerRef} className="relative w-full max-h-[600px] flex items-center justify-center bg-[#050414] rounded-xl overflow-hidden">
             <video
               className="block max-h-[600px] w-full object-contain"
               style={activeFeature === "camera" ? { transform: "scaleX(-1)" } : undefined}
@@ -117,6 +119,7 @@ const ImageDisplay = memo(function ImageDisplay({
               className="absolute inset-0 w-full h-full pointer-events-none"
               style={{ objectFit: "contain" }}
             ></canvas>
+            {children}
           </div>
         </div>
       </div>

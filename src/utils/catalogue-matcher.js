@@ -396,6 +396,7 @@ function findNearestFrame(frames, timestamp) {
 function compareFrame(live, frame, config) {
   const pointComparison = compareKeypoints(live.keypoints, frame.keypoints, config);
   const angleScore = compareAngles(live.angles, frame.angles);
+  console.log("count:", pointComparison.count, "kpScore:", pointComparison.score, "angleScore:", angleScore);
 
   if (pointComparison.count < config.minComparableKeypoints) {
     return {

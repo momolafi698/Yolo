@@ -169,23 +169,22 @@ function getPoseProjectionAnchor(pose) {
   if (!isVisibleKeypoint(leftHip) || !isVisibleKeypoint(rightHip)) return null;
 
   const origin = midpoint(leftHip, rightHip);
-  let scale = null;
 
+  // Rotation-robust scale: shoulder width collapses when the player turns
+  // sideways, torso length doesn't - use whichever is larger (torso
+  // converted to shoulder-width units, torso =~ 1.11 shoulder widths).
+  let scale = 0;
   if (isVisibleKeypoint(leftShoulder) && isVisibleKeypoint(rightShoulder)) {
-    const shoulderWidth = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
-    if (shoulderWidth >= 15) scale = shoulderWidth;
+    scale = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
+  }
+  const shoulders = [leftShoulder, rightShoulder].filter((point) => isVisibleKeypoint(point));
+  if (shoulders.length > 0) {
+    const shoulderMid = shoulders.length === 2 ? midpoint(leftShoulder, rightShoulder) : shoulders[0];
+    const torsoHeight = Math.hypot(origin.x - shoulderMid.x, origin.y - shoulderMid.y);
+    scale = Math.max(scale, torsoHeight / 1.11);
   }
 
-  if (!scale) {
-    const shoulders = [leftShoulder, rightShoulder].filter((point) => isVisibleKeypoint(point));
-    if (shoulders.length > 0) {
-      const shoulderMid = shoulders.length === 2 ? midpoint(leftShoulder, rightShoulder) : shoulders[0];
-      const torsoHeight = Math.hypot(origin.x - shoulderMid.x, origin.y - shoulderMid.y);
-      if (torsoHeight >= 15) scale = torsoHeight;
-    }
-  }
-
-  return scale ? { origin, scale } : null;
+  return scale >= 15 ? { origin, scale } : null;
 }
 
 // Draws the expected pose as a "ghost" skeleton superimposed on the live

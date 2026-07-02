@@ -520,31 +520,29 @@ function normalizeKeypoints(detection, threshold) {
   if (!visible(leftHip, threshold) || !visible(rightHip, threshold)) return null;
   const origin = midpoint(leftHip, rightHip);
 
-  // Primary scale: shoulder width (body-proportional, scale-invariant).
-  let scale = null;
+  // Rotation-robust scale: shoulder width alone collapses toward zero when
+  // the dancer turns sideways, which explodes every normalized coordinate
+  // (the "teleporting joints" overlay artifact). Torso length barely changes
+  // with body rotation, so take the max of the two, converting torso to
+  // shoulder-width units (torso =~ 1.11 shoulder widths on a standard body).
+  let scale = 0;
   if (visible(leftShoulder, threshold) && visible(rightShoulder, threshold)) {
-    const d = distance(leftShoulder, rightShoulder);
-    if (d >= MIN_NORM_SCALE) scale = d;
+    scale = distance(leftShoulder, rightShoulder);
   }
-
-  // Secondary scale: torso height (hip midpoint → shoulder midpoint).
-  // Used when both shoulders are occluded or detected too close together.
-  if (!scale) {
-    const visShoulders = [
-      visible(leftShoulder, threshold) ? leftShoulder : null,
-      visible(rightShoulder, threshold) ? rightShoulder : null,
-    ].filter(Boolean);
-    if (visShoulders.length > 0) {
-      const shoulderMid = visShoulders.length === 2
-        ? midpoint(leftShoulder, rightShoulder)
-        : visShoulders[0];
-      const torso = distance(origin, shoulderMid);
-      if (torso >= MIN_NORM_SCALE) scale = torso;
-    }
+  const visShoulders = [
+    visible(leftShoulder, threshold) ? leftShoulder : null,
+    visible(rightShoulder, threshold) ? rightShoulder : null,
+  ].filter(Boolean);
+  if (visShoulders.length > 0) {
+    const shoulderMid = visShoulders.length === 2
+      ? midpoint(leftShoulder, rightShoulder)
+      : visShoulders[0];
+    const torso = distance(origin, shoulderMid);
+    scale = Math.max(scale, torso / 1.11);
   }
 
   // No reliable scale available — skip normalization for this frame.
-  if (!scale) return null;
+  if (scale < MIN_NORM_SCALE) return null;
 
   return {
     origin: { x: round(origin.x), y: round(origin.y) },

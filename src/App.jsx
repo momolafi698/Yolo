@@ -148,6 +148,168 @@ function getPoseProjectionAnchor(pose) {
   return scale ? { origin, scale } : null;
 }
 
+function drawPoseSkeletonOnCanvas(ctx, keypoints, scale, centerX, centerY, color, lineWidth) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  const getCanvasCoords = (kp) => {
+    if (!kp || typeof kp.x !== "number" || typeof kp.y !== "number") return null;
+    return {
+      x: centerX + kp.x * scale,
+      y: centerY + kp.y * scale
+    };
+  };
+
+  const SKELETON = [
+    [15, 13], [13, 11], [16, 14], [14, 12], [11, 12],
+    [5, 11], [6, 12], [5, 6], [5, 7], [6, 8],
+    [7, 9], [8, 10], [1, 2], [0, 1], [0, 2],
+    [1, 3], [2, 4], [3, 5], [4, 6]
+  ];
+
+  for (const [fromIdx, toIdx] of SKELETON) {
+    const fromKp = keypoints[fromIdx];
+    const toKp = keypoints[toIdx];
+    
+    if (fromKp && toKp && (fromKp.score === undefined || fromKp.score > 0.15) && (toKp.score === undefined || toKp.score > 0.15)) {
+      const fromProj = getCanvasCoords(fromKp);
+      const toProj = getCanvasCoords(toKp);
+      if (fromProj && toProj) {
+        ctx.beginPath();
+        ctx.moveTo(fromProj.x, fromProj.y);
+        ctx.lineTo(toProj.x, toProj.y);
+        ctx.stroke();
+      }
+    }
+  }
+
+  ctx.fillStyle = color === "rgba(6, 182, 212, 0.9)" ? "rgba(244, 114, 182, 0.95)" : color;
+  for (const kp of keypoints) {
+    if (kp && (kp.score === undefined || kp.score > 0.15)) {
+      const proj = getCanvasCoords(kp);
+      if (proj) {
+        ctx.beginPath();
+        ctx.arc(proj.x, proj.y, lineWidth * 1.1, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
+  }
+}
+
+const PoseReplayCanvas = ({ frames }) => {
+  const canvasRef = useRef(null);
+  const animFrameRef = useRef(null);
+  const frameIdxRef = useRef(0);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !frames || frames.length === 0) return;
+
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // Compute a bounding box that covers ALL frames to keep a stable viewport
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const f of frames) {
+      for (const kp of [...(f.userPose || []), ...(f.targetPose || [])]) {
+        if (kp && typeof kp.x === "number" && (kp.score === undefined || kp.score > 0.1)) {
+          if (kp.x < minX) minX = kp.x;
+          if (kp.x > maxX) maxX = kp.x;
+          if (kp.y < minY) minY = kp.y;
+          if (kp.y > maxY) maxY = kp.y;
+        }
+      }
+    }
+
+    // Fallback range if no valid keypoints found
+    if (!isFinite(minX)) { minX = -1; maxX = 1; minY = -1; maxY = 1; }
+
+    const pad = 0.25;
+    const rangeX = (maxX - minX) + pad * 2;
+    const rangeY = (maxY - minY) + pad * 2;
+    const scaleX = w / rangeX;
+    const scaleY = h / rangeY;
+    const scale = Math.min(scaleX, scaleY) * 0.85;
+    const centerX = w / 2 - ((minX + maxX) / 2) * scale;
+    const centerY = h / 2 - ((minY + maxY) / 2) * scale;
+
+    const drawFrame = () => {
+      const frameData = frames[frameIdxRef.current];
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, w, h);
+
+      if (frameData) {
+        // Draw target pose (CYAN) first so user pose renders on top
+        if (frameData.targetPose) {
+          drawPoseSkeletonOnCanvas(ctx, frameData.targetPose, scale, centerX, centerY, "rgba(6, 182, 212, 0.85)", 5);
+        }
+        // Draw user pose (FUCHSIA)
+        if (frameData.userPose) {
+          drawPoseSkeletonOnCanvas(ctx, frameData.userPose, scale, centerX, centerY, "rgba(217, 70, 239, 0.9)", 5);
+        }
+
+        // Frame score badge (top-right corner)
+        if (typeof frameData.score === "number") {
+          const scoreColor = frameData.score >= 60 ? "#10b981" : frameData.score >= 40 ? "#f59e0b" : "#ef4444";
+          ctx.fillStyle = scoreColor;
+          ctx.font = "bold 13px Inter, sans-serif";
+          ctx.textAlign = "right";
+          ctx.fillText(`${frameData.score}%`, w - 8, 20);
+        }
+
+        // Progress bar at bottom
+        const progress = (frameIdxRef.current + 1) / frames.length;
+        ctx.fillStyle = "#e2e8f0";
+        ctx.fillRect(0, h - 4, w, 4);
+        ctx.fillStyle = "#8b5cf6";
+        ctx.fillRect(0, h - 4, w * progress, 4);
+      }
+
+      frameIdxRef.current = (frameIdxRef.current + 1) % frames.length;
+      // ~20 FPS playback
+      animFrameRef.current = setTimeout(drawFrame, 50);
+    };
+
+    frameIdxRef.current = 0;
+    drawFrame();
+
+    return () => {
+      if (animFrameRef.current) clearTimeout(animFrameRef.current);
+    };
+  }, [frames]);
+
+  if (!frames || frames.length === 0) return null;
+
+  return (
+    <div className="flex flex-col items-center gap-2 bg-white rounded-2xl p-3 shadow-lg border border-violet-200 flex-1 min-w-0 max-w-xs w-full">
+      <div className="flex justify-between w-full text-[10px] font-bold text-slate-700 px-1">
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#d946ef] flex-shrink-0 shadow-[0_0_4px_#d946ef]"></span>
+          Ta silhouette
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#06b6d4] flex-shrink-0 shadow-[0_0_4px_#06b6d4]"></span>
+          Cible attendue
+        </span>
+      </div>
+      <canvas
+        ref={canvasRef}
+        width={280}
+        height={300}
+        className="rounded-xl border border-slate-100 w-full"
+        style={{ imageRendering: "pixelated" }}
+      />
+      <span className="text-[9px] text-slate-400 font-semibold italic">
+        Replay de {frames.length} frames analysées • En boucle
+      </span>
+    </div>
+  );
+};
+
+
 function createDebugTargetPrediction(
   dance,
   match,
@@ -280,6 +442,7 @@ function App() {
 
   const [preciseAnalysisProgress, setPreciseAnalysisProgress] = useState(0);
   const [preciseAnalysisStatus, setPreciseAnalysisStatus] = useState("");
+  const [poseReplayFrames, setPoseReplayFrames] = useState([]);
 
   const recordedFramesRef = useRef([]);
   const lastRecordedTimeRef = useRef(0);
@@ -380,6 +543,7 @@ function App() {
   const abortRecording = useCallback(() => {
     shouldAnalyzeRef.current = false;
     recordedFramesRef.current = [];
+    setPoseReplayFrames([]);
   }, []);
 
   const prepareCountdown = useCallback(() => {
@@ -432,7 +596,23 @@ function App() {
 
   const processFramePromise = useCallback((bitmap, config) => {
     return new Promise((resolve) => {
-      inferenceResolverRef.current = resolve;
+      // Use a ref-like object so the timeout closure can access wrappedResolve after declaration
+      const slot = { fn: null };
+
+      const timeoutId = setTimeout(() => {
+        if (inferenceResolverRef.current === slot.fn) {
+          inferenceResolverRef.current = null;
+          console.warn("[PreciseAnalysis] Worker timeout on frame – skipping");
+          resolve({ results: [] });
+        }
+      }, 30000);
+
+      slot.fn = (data) => {
+        clearTimeout(timeoutId);
+        resolve(data);
+      };
+
+      inferenceResolverRef.current = slot.fn;
       postInferenceMessageRef.current?.(
         {
           type: "INFERENCE",
@@ -500,6 +680,10 @@ function App() {
     setPreciseAnalysisProgress(0);
     setPreciseAnalysisStatus("Chargement du modèle de haute précision...");
 
+    // Drain any in-flight worker response from the media loop to avoid stealing our resolver
+    inferenceResolverRef.current = null;
+    await new Promise((r) => setTimeout(r, 250));
+
     try {
       // 1. Load yolo26s-pose.onnx
       await loadModelPromise("yolo26s");
@@ -512,17 +696,30 @@ function App() {
 
       const precisePrecisions = [];
       const liveSequence = [];
+      const replayFramesBuffer = []; // Collect ALL frames for animated replay
 
       // Find the current selected dance
       const selectedDance = selectedDanceId
         ? catalogue?.dances?.find((d) => d.id === selectedDanceId)
         : null;
 
+      const canvas = overlayRef.current;
+      const overlayCtx = canvas ? canvas.getContext("2d") : null;
+
       for (let i = 0; i < frames.length; i++) {
         const frame = frames[i];
         
         // Convert Blob to ImageBitmap
         const bitmap = await createImageBitmap(frame.blob);
+
+        if (overlayCtx && canvas) {
+          if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+          }
+          overlayCtx.clearRect(0, 0, canvas.width, canvas.height);
+          overlayCtx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        }
 
         const data = await processFramePromise(bitmap, {
           ...DEFAULT_MODEL_CONFIG,
@@ -537,6 +734,16 @@ function App() {
           });
           if (sample) {
             liveSequence.push(sample);
+          }
+
+          if (overlayCtx) {
+            renderOverlay(
+              [targetPose],
+              null,
+              overlayCtx,
+              "pose",
+              DEFAULT_MODEL_CONFIG.classes,
+            );
           }
         }
 
@@ -568,15 +775,82 @@ function App() {
             : Math.min(100, Math.round(20 + ((rawPrecision - 20) * 80) / 65));
 
           precisePrecisions.push(precision);
+
+          const currentBestDance = selectedDance || (instantMatch.best
+            ? catalogue?.dances?.find((d) => d.id === instantMatch.best.id)
+            : null);
+
+          // Collect this frame's user pose + matching catalogue pose for replay
+          if (currentBestDance && targetPose && instantMatch.best) {
+            const isTimelineSynced = Boolean(
+              (activeFeatureRef.current === "camera" && currentAudioRef.current) ||
+              activeFeatureRef.current === "video"
+            );
+            const targetTimestamp = isTimelineSynced
+              ? frame.timestamp
+              : (
+                instantMatch.best.startTimestamp !== null && instantMatch.best.startTimestamp !== undefined
+                  ? instantMatch.best.startTimestamp + (frame.timestamp - (liveSequence[0]?.timestamp ?? 0)) * (instantMatch.best.speedFactor ?? 1)
+                  : frame.timestamp
+              );
+            const syncFps = currentBestDance.sampledFps || CATALOGUE_SYNC_FPS;
+            const targetFrameIndex = isTimelineSynced
+              ? Math.round(Math.max(0, targetTimestamp) * syncFps)
+              : null;
+            const catalogueFrame = findNearestCatalogueFrame(
+              currentBestDance.frames,
+              Math.max(0, targetTimestamp),
+              targetFrameIndex,
+            );
+
+            if (catalogueFrame?.keypoints) {
+              const userSample = createPoseSample(targetPose, frame.timestamp, {
+                mirror: activeFeatureRef.current === "camera",
+              });
+              if (userSample) {
+                replayFramesBuffer.push({
+                  userPose: userSample.keypoints,
+                  targetPose: catalogueFrame.keypoints,
+                  score: precision,
+                });
+              }
+            }
+          }
+
+          if (overlayCtx && currentBestDance && targetPose) {
+            const isTimelineSynced = Boolean(
+              (activeFeatureRef.current === "camera" && currentAudioRef.current) ||
+              activeFeatureRef.current === "video"
+            );
+
+            const debugPrediction = createDebugTargetPrediction(
+              currentBestDance,
+              instantMatch.best,
+              liveSequence,
+              targetPose,
+              frame.timestamp,
+              canvas,
+              { syncToTimeline: isTimelineSynced },
+            );
+
+            if (debugPrediction) {
+              renderOverlay(
+                [debugPrediction],
+                null,
+                overlayCtx,
+                "pose",
+                DEFAULT_MODEL_CONFIG.classes,
+                { pose: DEBUG_TARGET_COLORS },
+              );
+            }
+          }
         }
 
         currentStep++;
         setPreciseAnalysisProgress(Math.min(99, Math.round((currentStep / totalSteps) * 100)));
         
-        // Yield thread execution for rendering UI smoothly
-        if (i % 2 === 0) {
-          await new Promise((r) => setTimeout(r, 0));
-        }
+        // Yield thread execution for rendering UI smoothly and pacing playback
+        await new Promise((r) => setTimeout(r, 15));
       }
 
       setPreciseAnalysisStatus("Calcul du score final...");
@@ -585,6 +859,11 @@ function App() {
       const finalScore = precisePrecisions.length > 0
         ? Math.round(precisePrecisions.reduce((a, b) => a + b, 0) / precisePrecisions.length)
         : 0;
+
+      // Store all replay frames for animated overlay display
+      if (replayFramesBuffer.length > 0) {
+        setPoseReplayFrames(replayFramesBuffer);
+      }
 
       await new Promise((r) => setTimeout(r, 1000));
 
@@ -1328,54 +1607,65 @@ function App() {
           )}
 
           {gameState === "analyzing" && (
-            <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center flex-col gap-6 rounded-2xl p-6 text-center animate-fade-in border border-violet-500/30 shadow-[0_0_50px_rgba(139,92,246,0.3)] z-50">
-              <div className="w-16 h-16 border-4 border-t-fuchsia-500 border-r-fuchsia-500 border-b-violet-500 border-l-violet-500 rounded-full animate-spin"></div>
-              <div>
-                <h2 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-500 uppercase tracking-widest text-violet-neon">
-                  Analyse Haute Précision
-                </h2>
-                <p className="text-slate-300 text-sm mt-2 font-semibold">{preciseAnalysisStatus}</p>
+            <div className="absolute bottom-4 left-4 right-4 bg-black/85 backdrop-blur-md flex items-center justify-between gap-4 rounded-xl p-4 border border-violet-500/30 shadow-[0_0_30px_rgba(139,92,246,0.3)] z-50 animate-fade-in">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 border-4 border-t-fuchsia-500 border-r-fuchsia-500 border-b-violet-500 border-l-violet-500 rounded-full animate-spin flex-shrink-0"></div>
+                <div className="text-left">
+                  <h2 className="text-sm font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-500 uppercase tracking-wider">
+                    Analyse Haute Précision
+                  </h2>
+                  <p className="text-slate-300 text-xs mt-0.5 font-semibold line-clamp-1">{preciseAnalysisStatus}</p>
+                </div>
               </div>
-              <div className="w-full max-w-xs bg-[#050818]/80 rounded-full h-3 overflow-hidden border border-violet-500/20 shadow-inner">
-                <div 
-                  className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-full rounded-full transition-all duration-300"
-                  style={{ width: `${preciseAnalysisProgress}%` }}
-                ></div>
+              <div className="flex items-center gap-3 flex-1 max-w-xs justify-end">
+                <div className="w-full bg-[#050818]/80 rounded-full h-2 overflow-hidden border border-violet-500/20 shadow-inner">
+                  <div 
+                    className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-full rounded-full transition-all duration-300"
+                    style={{ width: `${preciseAnalysisProgress}%` }}
+                  ></div>
+                </div>
+                <span className="text-xs text-violet-300 font-bold tracking-wider flex-shrink-0">{preciseAnalysisProgress}%</span>
               </div>
-              <span className="text-xs text-violet-300 font-bold uppercase tracking-widest">{preciseAnalysisProgress}%</span>
             </div>
           )}
 
           {gameState === "pause" && lastDanceInfo && (
-            <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center flex-col gap-6 rounded-2xl p-6 text-center animate-fade-in border border-violet-500/30 shadow-[0_0_50px_rgba(139,92,246,0.3)] z-50">
-              <div className="animate-bounce">
-                <span className="text-5xl">🏆</span>
-              </div>
-              <div>
-                <h2 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-500 uppercase tracking-widest text-violet-neon">
-                  Musique Terminée !
-                </h2>
-                <p className="text-slate-300 text-lg mt-1 font-semibold">{lastDanceInfo.title}</p>
-              </div>
+            <div className="absolute inset-0 bg-black/90 backdrop-blur-md flex flex-col md:flex-row items-center justify-center gap-8 rounded-2xl p-6 text-center animate-fade-in border border-violet-500/30 shadow-[0_0_50px_rgba(139,92,246,0.3)] z-50 overflow-y-auto">
+              <div className="flex flex-col items-center gap-4">
+                <div className="animate-bounce">
+                  <span className="text-5xl">🏆</span>
+                </div>
+                <div>
+                  <h2 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-500 uppercase tracking-widest text-violet-neon">
+                    Musique Terminée !
+                  </h2>
+                  <p className="text-slate-300 text-sm mt-1 font-semibold max-w-[285px] truncate">{lastDanceInfo.title}</p>
+                </div>
 
-              <div className="bg-[#050818]/60 border border-violet-500/30 rounded-2xl px-8 py-6 shadow-inner flex flex-col items-center gap-2 min-w-[240px]">
-                <span className="text-xs uppercase tracking-wider text-violet-400 font-bold">Votre Score</span>
-                <span className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400 animate-pulse">
-                  {lastDanceInfo.score}
-                </span>
-                <span className="text-sm font-semibold text-slate-400 mt-2">
-                  {lastDanceInfo.rank === "A" ? "🔥 RANG A - SUPER STAR ! 🔥" :
-                   lastDanceInfo.rank === "B" ? "✨ RANG B - TRÈS BIEN ! ✨" :
-                                                "👍 RANG C - BIEN JOUÉ ! 👍"}
-                </span>
-              </div>
+                <div className="bg-[#050818]/60 border border-violet-500/30 rounded-2xl px-6 py-4 shadow-inner flex flex-col items-center gap-1 min-w-[200px]">
+                  <span className="text-[10px] uppercase tracking-wider text-violet-400 font-bold">Votre Score</span>
+                  <span className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400 animate-pulse">
+                    {lastDanceInfo.score}
+                  </span>
+                  <span className="text-xs font-semibold text-slate-400 mt-1">
+                    {lastDanceInfo.rank === "A" ? "🔥 RANG A - SUPER STAR !" :
+                     lastDanceInfo.rank === "B" ? "✨ RANG B - TRÈS BIEN !" :
+                                                  "👍 RANG C - BIEN JOUÉ !"}
+                  </span>
+                </div>
 
-              <div className="flex flex-col items-center gap-2 mt-2">
-                <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Prochaine danse dans</span>
-                <div className="flex items-center justify-center w-12 h-12 rounded-full border-2 border-fuchsia-500 text-fuchsia-400 font-black text-xl bg-fuchsia-500/10 shadow-[0_0_15px_rgba(217,70,239,0.4)]">
-                  {pauseCountdown}
+                <div className="flex flex-col items-center gap-1 mt-1">
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Prochaine danse dans</span>
+                  <div className="flex items-center justify-center w-10 h-10 rounded-full border-2 border-fuchsia-500 text-fuchsia-400 font-black text-lg bg-fuchsia-500/10 shadow-[0_0_15px_rgba(217,70,239,0.4)]">
+                    {pauseCountdown}
+                  </div>
                 </div>
               </div>
+
+              {/* Animated Silhouette Replay Canvas */}
+              {poseReplayFrames.length > 0 && (
+                <PoseReplayCanvas frames={poseReplayFrames} />
+              )}
             </div>
           )}
 

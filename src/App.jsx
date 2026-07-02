@@ -1680,13 +1680,7 @@ function App() {
               danceScore={danceScore}
               sessionPrecisions={sessionPrecisionsRef.current}
             >
-              {/* Floating remaining time overlay (visible in both normal and fullscreen modes) */}
-              {audioTimeLeft !== null && audioTimeLeft !== undefined && (
-                <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-45 flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-fuchsia-500/30 text-fuchsia-300 font-mono text-sm font-bold shadow-[0_0_15px_rgba(217,70,239,0.25)] select-none">
-                  <span className="w-2 h-2 rounded-full bg-fuchsia-500 animate-ping inline-block mr-0.5"></span>
-                  🎵 {formatTime(audioTimeLeft)} restant
-                </div>
-              )}
+
 
               {/* Countdown HUD overlay inside the camera screen */}
               {activeFeature === "camera" && gameState === "countdown" && (

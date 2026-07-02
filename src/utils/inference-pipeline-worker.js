@@ -7,7 +7,7 @@ const offscreen = new OffscreenCanvas(0, 0);
 const ctx = offscreen.getContext("2d", { willReadFrequently: true });
 
 self.addEventListener("message", async (event) => {
-  const { type, config, bitmap } = event.data;
+  const { type, config, bitmap, syncTimestamp } = event.data;
   const modelKey = config.model + config.task + config.backend;
 
   switch (event.data.type) {
@@ -62,6 +62,7 @@ self.addEventListener("message", async (event) => {
         results: results,
         maskImageData: maskImageData,
         inferenceTime: inferenceTime,
+        syncTimestamp,
       });
 
       break;

@@ -150,22 +150,19 @@ function getPoseProjectionAnchor(pose) {
 
 function createDebugTargetPrediction(
   dance,
-  match,
   detectedPose,
   elapsedSeconds,
   canvas,
 ) {
   if (!dance?.frames?.length || !detectedPose?.keypoints || !canvas) return null;
 
-  // alignedTimestamp/alignedFrameIndex come straight from the DTW path's
-  // last aligned step - i.e. what the matcher actually locked onto for the
-  // most recent live sample, rather than a naive elapsed-time projection.
-  const targetTimestamp = match?.alignedTimestamp ?? elapsedSeconds;
-  const targetFrameIndex = match?.alignedFrameIndex ?? null;
+  // Keep the visible target locked to the media clock. The diagnostic panel
+  // can still inspect the DTW-aligned frame, but the overlay should show the
+  // pose expected at the current audio/video time.
+  const targetTimestamp = elapsedSeconds;
   const frame = findNearestCatalogueFrame(
     dance.frames,
     Math.max(0, targetTimestamp),
-    targetFrameIndex,
   );
   const anchor = getPoseProjectionAnchor(detectedPose);
 
@@ -602,7 +599,7 @@ function App() {
             color: "text-cyan-300 font-black",
           });
         } else if (targetPose?.keypoints && catalogue && state === "detecting") {
-          const elapsedSeconds = getSyncTimeSeconds();
+          const elapsedSeconds = data.syncTimestamp ?? getSyncTimeSeconds();
           const selectedDance = selectedDanceId
             ? catalogue.dances.find((dance) => dance.id === selectedDanceId)
             : null;
@@ -664,7 +661,6 @@ function App() {
             const debugDance = catalogue.dances.find((dance) => dance.id === debugDanceId);
             const debugPrediction = createDebugTargetPrediction(
               debugDance,
-              instantMatch.best,
               targetPose,
               elapsedSeconds,
               overlayCtx.canvas,
@@ -829,6 +825,7 @@ function App() {
     isProcessingRef.current = true;
 
     try {
+      const syncTimestamp = getSyncTimeSeconds();
       const vw = mediaElement.videoWidth;
       const vh = mediaElement.videoHeight;
       const scale = Math.min(1, MAX_INFER_DIM / Math.max(vw, vh));
@@ -874,6 +871,7 @@ function App() {
           type: "INFERENCE",
           config: DEFAULT_MODEL_CONFIG,
           bitmap,
+          syncTimestamp,
         },
         [bitmap],
       );
@@ -881,7 +879,7 @@ function App() {
       console.error("Frame capture error:", error);
       isProcessingRef.current = false;
     }
-  }, [postInferenceMessage]);
+  }, [getSyncTimeSeconds, postInferenceMessage]);
 
   const stopMediaLoop = useCallback(() => {
     mediaLoopTokenRef.current += 1;

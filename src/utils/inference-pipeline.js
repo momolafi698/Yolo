@@ -1,6 +1,26 @@
 import cv from "@techstark/opencv-js";
 import { preProcessImage, Colors, applyNMS } from "./process-util";
 
+const KEYPOINT_NAMES = [
+  "nose",
+  "leftEye",
+  "rightEye",
+  "leftEar",
+  "rightEar",
+  "leftShoulder",
+  "rightShoulder",
+  "leftElbow",
+  "rightElbow",
+  "leftWrist",
+  "rightWrist",
+  "leftHip",
+  "rightHip",
+  "leftKnee",
+  "rightKnee",
+  "leftAnkle",
+  "rightAnkle",
+];
+
 /**
  * Inference pipeline for YOLO model.
  * @param {ImageData} imageData - Input image data.
@@ -306,6 +326,7 @@ function postProcessPose(rawTensor, scoreThreshold = 0.45, xRatio, yRatio, xOffs
     for (let kp = 0; kp < NUM_KEYPOINTS; kp++) {
       const baseIdx = kp * KEYPOINT_DIMS * NUM_PREDICTIONS + i;
       keypoints[kp] = {
+        name: KEYPOINT_NAMES[kp],
         x: keypointsData[baseIdx] * xRatio - xOffset,
         y: keypointsData[baseIdx + NUM_PREDICTIONS] * yRatio - yOffset,
         score: keypointsData[baseIdx + NUM_PREDICTIONS * 2],
@@ -368,6 +389,7 @@ function postProcessPoseEnd2End(
     for (let kp = 0; kp < NUM_KEYPOINTS; kp++) {
       const baseIdx = offset + NUM_BBOX_ATTRS + kp * KEYPOINT_DIMS;
       keypoints[kp] = {
+        name: KEYPOINT_NAMES[kp],
         x: predictions[baseIdx] * xRatio - xOffset,
         y: predictions[baseIdx + 1] * yRatio - yOffset,
         score: predictions[baseIdx + 2],

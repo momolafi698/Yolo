@@ -15,6 +15,26 @@ const KP = {
   rightAnkle: 16,
 };
 
+const KEYPOINT_NAMES = [
+  "nose",
+  "leftEye",
+  "rightEye",
+  "leftEar",
+  "rightEar",
+  "leftShoulder",
+  "rightShoulder",
+  "leftElbow",
+  "rightElbow",
+  "leftWrist",
+  "rightWrist",
+  "leftHip",
+  "rightHip",
+  "leftKnee",
+  "rightKnee",
+  "leftAnkle",
+  "rightAnkle",
+];
+
 const ANGLE_NAMES = [
   "leftElbow",
   "rightElbow",
@@ -82,7 +102,7 @@ const DEFAULT_OPTIONS = {
   // cleaner match before showing anything. Use `npm run evaluate:matcher`
   // after changing this - it prints the cross-dance false-positive score
   // distribution (p90/p95/p99) so you can see how close you're cutting it.
-  minConfidence: 65,
+  minConfidence: 45,
   // Minimum number of live pose samples buffered before matching even
   // starts. Too low and single-frame noise can trigger a match; too high
   // delays the first score after the player starts moving. Tied to
@@ -134,7 +154,7 @@ const DEFAULT_OPTIONS = {
   // players can start dancing well before/after the reference video's
   // timeline; lower it to keep the search fast and avoid matching a
   // coincidentally-similar moment far away in the song.
-  fallbackTimeTolerance: 2.0,
+  fallbackTimeTolerance: 5.0,
   // Small extra cost added for every non-diagonal (insertion/deletion) DTW
   // step, to discourage the alignment from taking long degenerate runs
   // (e.g. freezing on one frame) just to dodge a costly comparison. Raise it
@@ -152,7 +172,7 @@ const DEFAULT_OPTIONS = {
   // `npm run evaluate:matcher` after touching these; widening them from
   // {0.12, 0.16, 0.22} to {0.16, 0.20, 0.28} alone pushed the cross-dance
   // false-positive detection rate from 0% to ~28-59% in testing.
-  keypointSigma: { core: 0.12, mid: 0.16, extremity: 0.22 },
+  keypointSigma: { core: 1.0, mid: 1.0, extremity: 1.0 },
   // Same idea as keypointSigma but for joint angles (degrees) instead of
   // joint positions - core joints (shoulders/hips) tighter, elbows/knees
   // ("mid") looser. Same false-positive sensitivity warning applies.
@@ -752,8 +772,8 @@ function normalizeKeypoints(keypoints, bbox, threshold) {
 
   if (!scale) return null;
 
-  const normalized = keypoints.map((point) => ({
-    name: point.name,
+  const normalized = keypoints.map((point, index) => ({
+    name: point.name ?? KEYPOINT_NAMES[index],
     x: (point.x - origin.x) / scale,
     y: (point.y - origin.y) / scale,
     score: point.score,

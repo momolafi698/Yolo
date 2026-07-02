@@ -1777,11 +1777,8 @@ function App() {
               {activeFeature === "camera" && (gameState === "detecting" || gameState === "countdown" || gameState === "waiting_for_person") && (
                 <div className="absolute bottom-4 left-4 right-4 z-40 flex items-center justify-between bg-black/60 backdrop-blur-md border border-fuchsia-500/30 rounded-2xl p-4 shadow-[0_0_30px_rgba(217,70,239,0.25)] gap-4 transition-all duration-300">
                   <div className="flex flex-col min-w-0 flex-1 text-left">
-                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider flex items-center gap-1.5">
-                      <span>Chanson</span>
-                      {audioTimeLeft !== null && (
-                        <span className="text-fuchsia-400 font-black animate-pulse">• {formatTime(audioTimeLeft)}</span>
-                      )}
+                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">
+                      Chanson
                     </span>
                     <span className="font-display text-base text-cyan-neon truncate font-black">
                       {selectedDanceId
@@ -1791,7 +1788,12 @@ function App() {
                   </div>
 
                   <div className="flex-1 max-w-xs flex flex-col gap-1 items-center">
-                    <span className="text-[9px] uppercase font-extrabold text-slate-400 tracking-wider">Évolution</span>
+                    <span className="text-[9px] uppercase font-extrabold text-slate-400 tracking-wider flex items-center gap-1.5">
+                      <span>Évolution</span>
+                      {audioTimeLeft !== null && (
+                        <span className="text-fuchsia-400 font-black animate-pulse">• {formatTime(audioTimeLeft)}</span>
+                      )}
+                    </span>
                     <div className="flex items-end gap-0.5 h-8 w-full bg-black/40 rounded-lg p-1 overflow-hidden justify-center shadow-inner">
                       {sessionPrecisionsRef.current.slice(-25).map((p, idx) => (
                         <div

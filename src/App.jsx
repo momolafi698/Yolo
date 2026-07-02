@@ -1797,18 +1797,9 @@ function App() {
                   </div>
 
                   <div className="flex-1 max-w-xs flex flex-col gap-2 items-center">
-                    <div className="flex items-center gap-2 justify-center">
-                      <span className="text-xs uppercase font-extrabold text-slate-400 tracking-wider">
-                        Durée :
-                      </span>
-                      {audioTimeLeft !== null ? (
-                        <span className="text-2xl md:text-3xl font-black text-fuchsia-400 font-display animate-pulse drop-shadow-[0_0_10px_rgba(217,70,239,0.6)]">
-                          {formatTime(audioTimeLeft)}
-                        </span>
-                      ) : (
-                        <span className="text-slate-500 font-display text-sm">--:--</span>
-                      )}
-                    </div>
+                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">
+                      Évolution
+                    </span>
                     <div className="flex items-end gap-0.5 h-14 w-full bg-black/40 rounded-lg p-1.5 overflow-hidden justify-center shadow-inner">
                       {sessionPrecisionsRef.current.slice(-25).map((p, idx) => (
                         <div
@@ -1824,7 +1815,20 @@ function App() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3.5 shrink-0">
+                  <div className="flex items-center gap-6 shrink-0">
+                    {audioTimeLeft !== null ? (
+                      <div className="flex flex-col items-center justify-center mr-2 text-right">
+                        <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider mb-1">Durée Restante</span>
+                        <span className="text-2xl md:text-3xl font-black text-fuchsia-400 font-display animate-pulse drop-shadow-[0_0_10px_rgba(217,70,239,0.6)]">
+                          {formatTime(audioTimeLeft)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center mr-2 text-right">
+                        <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider mb-1">Durée Restante</span>
+                        <span className="text-slate-500 font-display text-lg">--:--</span>
+                      </div>
+                    )}
                     <button
                       onClick={() => {
                         if (document.fullscreenElement === cameraContainerRef.current) {
@@ -1833,7 +1837,7 @@ function App() {
                           cameraContainerRef.current?.requestFullscreen().catch((err) => console.warn(err));
                         }
                       }}
-                      className="bg-violet-600/30 hover:bg-violet-600/60 border border-violet-500/40 hover:border-violet-500/80 rounded-xl p-3 flex items-center justify-center transition-all cursor-pointer shadow-md text-white select-none mr-1.5"
+                      className="bg-violet-600/30 hover:bg-violet-600/60 border border-violet-500/40 hover:border-violet-500/80 rounded-xl p-3 flex items-center justify-center transition-all cursor-pointer shadow-md text-white select-none"
                       title={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
                     >
                       {isFullscreen ? (
@@ -1848,18 +1852,6 @@ function App() {
                         </svg>
                       )}
                     </button>
-                    <div className="bg-[#050818]/80 border border-violet-500/20 rounded-lg px-5 py-2.5 flex flex-col items-center min-w-[110px]">
-                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Précision</span>
-                      <span className="text-xl md:text-2xl font-black text-cyan-400 font-display">
-                        {Math.round(dancePrecision)}%
-                      </span>
-                    </div>
-                    <div className="bg-[#050818]/80 border border-violet-500/20 rounded-lg px-5 py-2.5 flex flex-col items-center min-w-[110px]">
-                      <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Score</span>
-                      <span className="text-xl md:text-2xl font-black text-fuchsia-400 font-display">
-                        {danceScore}%
-                      </span>
-                    </div>
                   </div>
                 </div>
               )}

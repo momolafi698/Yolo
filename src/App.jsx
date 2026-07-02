@@ -377,8 +377,14 @@ function App() {
     mediaLoopTokenRef.current += 1;
   }, []);
 
+  const abortRecording = useCallback(() => {
+    shouldAnalyzeRef.current = false;
+    recordedFramesRef.current = [];
+  }, []);
+
   const prepareCountdown = useCallback(() => {
     resetLiveComparison();
+    abortRecording();
     sequenceStartRef.current = 0;
     setDanceScore(0);
     setCountdown(COUNTDOWN_SECONDS);
@@ -390,15 +396,9 @@ function App() {
     setCoachComments([
       "Prepare-toi. Detection temporelle dans 5 secondes.",
     ]);
-  }, [resetLiveComparison]);
-
-  const abortRecording = useCallback(() => {
-    shouldAnalyzeRef.current = false;
-    recordedFramesRef.current = [];
-  }, []);
+  }, [resetLiveComparison, abortRecording]);
 
   const stopMusic = useCallback(() => {
-    abortRecording();
     if (audioTimeoutRef.current) {
       window.clearInterval(audioTimeoutRef.current);
       window.clearTimeout(audioTimeoutRef.current);
@@ -413,7 +413,7 @@ function App() {
     setPauseCountdown(0);
     setAudioTimeLeft(null);
     playedDanceIdsRef.current = [];
-  }, [abortRecording]);
+  }, []);
 
   const loadModelPromise = useCallback((modelName) => {
     return new Promise((resolve) => {
@@ -527,13 +527,13 @@ function App() {
         const data = await processFramePromise(bitmap, {
           ...DEFAULT_MODEL_CONFIG,
           model: "yolo26s",
-          overlaySize: [640, 640],
+          overlaySize: [bitmap.width, bitmap.height],
         });
 
         const targetPose = getHighestScorePose(data.results);
         if (targetPose?.keypoints) {
           const sample = createPoseSample(targetPose, frame.timestamp, {
-            mirror: true,
+            mirror: activeFeatureRef.current === "camera",
           });
           if (sample) {
             liveSequence.push(sample);
@@ -686,7 +686,7 @@ function App() {
   }, [activeFeature, selectedDanceId, playMusicForCamera, stopMusic]);
 
   useEffect(() => {
-    if (gameState === "detecting" && activeFeature === "camera") {
+    if (gameState === "detecting" && (activeFeature === "camera" || activeFeature === "video")) {
       recordedFramesRef.current = [];
       shouldAnalyzeRef.current = true;
       lastRecordedTimeRef.current = 0;
@@ -1062,6 +1062,31 @@ function App() {
 
         bitmap = await createImageBitmap(mirrorCanvas);
       } else {
+        // Capture frame to JPEG blob for video post-analysis as well
+        const nowMs = performance.now();
+        if (shouldAnalyzeRef.current && nowMs - lastRecordedTimeRef.current >= 66) { // ~15 FPS
+          lastRecordedTimeRef.current = nowMs;
+          const timestamp = getSyncTimeSeconds();
+          if (!mirrorCanvas) {
+            mirrorCanvas = document.createElement("canvas");
+            mirrorCtx = mirrorCanvas.getContext("2d");
+          }
+          if (mirrorCanvas.width !== inferW || mirrorCanvas.height !== inferH) {
+            mirrorCanvas.width = inferW;
+            mirrorCanvas.height = inferH;
+          }
+          mirrorCtx.clearRect(0, 0, inferW, inferH);
+          mirrorCtx.drawImage(mediaElement, 0, 0, inferW, inferH);
+          mirrorCanvas.toBlob((blob) => {
+            if (shouldAnalyzeRef.current && blob) {
+              recordedFramesRef.current.push({
+                timestamp,
+                blob
+              });
+            }
+          }, "image/jpeg", 0.65);
+        }
+
         bitmap = await createImageBitmap(mediaElement, {
           resizeWidth: inferW,
           resizeHeight: inferH,
@@ -1131,6 +1156,7 @@ function App() {
       closeCamera();
     }
 
+    abortRecording();
     stopMediaLoop();
     resetLiveComparison();
     setDanceScore(0);
@@ -1146,9 +1172,10 @@ function App() {
     setCoachComments([
       `Video chargee: ${file.name}. Lance la lecture pour voir la detection realtime.`,
     ]);
-  }, [closeCamera, resetLiveComparison, stopMediaLoop]);
+  }, [closeCamera, resetLiveComparison, stopMediaLoop, abortRecording]);
 
   const stopVideo = useCallback(() => {
+    abortRecording();
     stopMediaLoop();
     videoRef.current?.pause();
     setVideoSrc("");
@@ -1170,7 +1197,7 @@ function App() {
     resetLiveComparison();
     setPerformanceRating({ text: "PRET", color: "text-slate-400" });
     setCoachComments(["Video fermee. Tu peux relancer la camera ou ouvrir une autre video."]);
-  }, [resetLiveComparison, stopMediaLoop]);
+  }, [resetLiveComparison, stopMediaLoop, abortRecording]);
 
   const handleVideoLoad = useCallback(() => {
     processMediaFrame(videoRef.current);
@@ -1201,7 +1228,12 @@ function App() {
       text: "FIN",
       color: "text-slate-400 font-black",
     });
-  }, [stopMediaLoop]);
+
+    if (recordedFramesRef.current.length > 0) {
+      currentDanceTitleRef.current = videoName || "Video Test";
+      runPreciseAnalysis();
+    }
+  }, [stopMediaLoop, runPreciseAnalysis, videoName]);
 
   const toggleCamera = useCallback(async () => {
     if (activeFeature === "camera") {

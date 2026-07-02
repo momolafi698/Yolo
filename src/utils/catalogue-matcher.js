@@ -13,6 +13,22 @@ const KP = {
   rightAnkle: 16,
 };
 
+// Only these 12 body joints are used for scoring (head/face excluded)
+const SCORING_KP_INDICES = new Set([
+  5,  // leftShoulder  — épaule gauche
+  6,  // rightShoulder — épaule droite
+  7,  // leftElbow     — coude gauche
+  8,  // rightElbow    — coude droit
+  9,  // leftWrist     — main gauche
+  10, // rightWrist    — main droite
+  11, // leftHip       — hanche gauche
+  12, // rightHip      — hanche droite
+  13, // leftKnee      — genou gauche
+  14, // rightKnee     — genou droit
+  15, // leftAnkle     — pied gauche
+  16, // rightAnkle    — pied droit
+]);
+
 const ANGLE_NAMES = [
   "leftElbow",
   "rightElbow",
@@ -27,7 +43,7 @@ const ANGLE_NAMES = [
 const DEFAULT_OPTIONS = {
   keypointThreshold: 0.20,
   maxPointDistance: 2.2,
-  minComparableKeypoints: 8,
+  minComparableKeypoints: 6,
   minConfidence: 52,
   minSequenceSamples: 8,
   sequenceWindowSeconds: 3,
@@ -463,6 +479,9 @@ function compareKeypoints(live, reference, config) {
   let count = 0;
 
   for (let i = 0; i < Math.min(live.length, reference.length); i++) {
+    // Only score on the 12 selected body joints (head/face excluded)
+    if (!SCORING_KP_INDICES.has(i)) continue;
+
     const a = live[i];
     const b = reference[i];
     if (!visible(a, config.keypointThreshold) || !visible(b, config.keypointThreshold)) {

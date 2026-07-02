@@ -13,14 +13,11 @@ const SKELETON = [
   [6, 8],
   [7, 9],
   [8, 10],
-  [1, 2],
-  [0, 1],
-  [0, 2],
-  [1, 3],
-  [2, 4],
-  [3, 5],
-  [4, 6],
+  // Head/face connections (0-4) removed — only the 12 body joints are shown
 ];
+
+// Keypoints indices 0-4 are head/face (nose, eyes, ears) — excluded from display
+const HEAD_KP_INDICES = new Set([0, 1, 2, 3, 4]);
 
 /**
  * Main entry point to render detection, segmentation, or pose results onto the canvas.
@@ -187,7 +184,9 @@ function drawPoseEstimation(predictions, ctx, lineWidth, options = {}) {
   ctx.beginPath();
   predictions.forEach((predict) => {
     if (!predict.keypoints) return;
-    predict.keypoints.forEach((keypoint) => {
+    predict.keypoints.forEach((keypoint, idx) => {
+      // Skip head/face keypoints (nose, eyes, ears)
+      if (HEAD_KP_INDICES.has(idx)) return;
       const { x, y, score } = keypoint;
       if (score < 0.5) return;
       ctx.moveTo(x + 3, y);

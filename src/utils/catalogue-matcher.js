@@ -62,33 +62,100 @@ const ANGLE_JOINT_TIER = {
 };
 
 const DEFAULT_OPTIONS = {
+  // Minimum keypoint confidence (0-1, from the pose model) for a joint to be
+  // treated as "visible" at all - anywhere below this, the joint is skipped
+  // rather than compared. Lower it if webcam pose detection tends to report
+  // low-confidence-but-correct joints (e.g. dim lighting); raise it if you'd
+  // rather ignore shaky/noisy joints than compare against a bad estimate.
   keypointThreshold: 0.20,
-  minComparableKeypoints: 8,
-  minConfidence: 55,
+  // How many of the 12 tracked joints must be visible (per keypointThreshold)
+  // in BOTH the live pose and the reference frame for that frame's comparison
+  // to count at all ("informative"). Below this, the frame is worth 0 and
+  // doesn't count toward score or coverage. Lower it to tolerate more
+  // occlusion/cropping (e.g. a webcam that only frames the upper body);
+  // raising it demands a fuller-body view before trusting any single frame.
+  minComparableKeypoints: 7,
+  // The final score (0-100) a dance candidate must reach to be considered
+  // "detected" at all. This is the main false-positive knob: lower it and
+  // more borderline/sloppy matches get accepted (more forgiving, but risks
+  // matching the wrong dance or a half-right move); raise it to demand a
+  // cleaner match before showing anything. Use `npm run evaluate:matcher`
+  // after changing this - it prints the cross-dance false-positive score
+  // distribution (p90/p95/p99) so you can see how close you're cutting it.
+  minConfidence: 50,
+  // Minimum number of live pose samples buffered before matching even
+  // starts. Too low and single-frame noise can trigger a match; too high
+  // delays the first score after the player starts moving. Tied to
+  // sequenceWindowSeconds and the live sampling rate (roughly, the camera's
+  // effective FPS) - don't set this above what a full window can hold.
   minSequenceSamples: 8,
+  // Length (seconds) of the rolling live-pose buffer matched against the
+  // catalogue each tick. Bigger = smoother/more stable scores but slower to
+  // react to a new move; smaller = more responsive but noisier frame-to-frame.
   sequenceWindowSeconds: 3,
   // Time-based coverage gate: what fraction of the live window must be
-  // backed by informative (enough visible keypoints) comparisons.
-  minCoverageFraction: 0.6,
+  // backed by informative (enough visible keypoints, see
+  // minComparableKeypoints) comparisons for the match to count as detected.
+  // Lower it to tolerate more dropped/occluded frames within an otherwise
+  // decent take; raise it to require the player stay fully visible
+  // throughout the whole window.
+  minCoverageFraction: 0.5,
   // Score-point gap required over the second-best dance candidate. Only
   // meaningful when more than one dance is being compared at once (the
   // video-mode fallback path) - a single pre-selected dance has no "other
-  // candidate" to be confused with.
+  // candidate" to be confused with. Lower it if the fallback path rejects
+  // matches that are obviously right just because two dances score close;
+  // raise it if it's flip-flopping between two similar-looking dances.
   minMargin: 6,
   // Local time-warping room around the audio-clock anchor, in seconds, for
   // the single-dance/audio-synced path. This is the direct replacement for
-  // the old rigid +/-0.22s nearest-frame snap with no warping at all.
-  syncBandSeconds: 0.5,
-  // Local time-warping room per coarse-scanned start candidate, for the
-  // fallback multi-dance search (no dance pre-selected / no audio clock).
+  // the old rigid +/-0.22s nearest-frame snap with no warping at all - it's
+  // the main "temporal room" knob: how far off-beat (reaction lag, audio
+  // latency, natural tempo drift) a player can be while still being aligned
+  // to the right reference frame. Raise it to forgive more timing slop;
+  // lower it if the matcher seems to be "catching up" to moves from the
+  // wrong part of the song. Also consider calibrating
+  // AUDIO_SYNC_OFFSET_SECONDS in App.jsx (currently 0, uncalibrated) if
+  // there's a consistent lag/lead rather than random jitter.
+  syncBandSeconds: 0.9,
+  // Same time-warping room as syncBandSeconds, but for the fallback
+  // multi-dance search (no dance pre-selected / no audio clock) - kept
+  // tighter since this path also has to search for the right start offset,
+  // and a wide band there makes the search both slower and more likely to
+  // drift onto the wrong choreography.
   fallbackBandSeconds: 0.35,
+  // How finely the fallback path scans candidate start offsets (seconds
+  // between scan points) before running the banded alignment at each one.
+  // Smaller = more thorough/slower search; larger = faster but can skip
+  // past the true starting offset entirely.
   fallbackAnchorStepSeconds: 0.3,
+  // How far (seconds, before/after the live sequence's own start time) the
+  // fallback path is willing to search for a starting offset. Raise it if
+  // players can start dancing well before/after the reference video's
+  // timeline; lower it to keep the search fast and avoid matching a
+  // coincidentally-similar moment far away in the song.
   fallbackTimeTolerance: 2.0,
-  // Small extra cost for non-diagonal (insertion/deletion) DTW steps, to
-  // discourage degenerate long runs while still allowing genuine local
-  // tempo variation within the band.
+  // Small extra cost added for every non-diagonal (insertion/deletion) DTW
+  // step, to discourage the alignment from taking long degenerate runs
+  // (e.g. freezing on one frame) just to dodge a costly comparison. Raise it
+  // to force more diagonal (one-to-one, real-time) steps; lower it to allow
+  // more aggressive local speed-up/slow-down warping.
   stepPenalty: 0.02,
+  // Per-joint positional tolerance (Gaussian sigma, in normalized
+  // hip-to-shoulder units) - core joints (hips/shoulders) are tightest since
+  // they anchor the pose, extremities (wrists/ankles) are loosest since
+  // both real dancers' precision and pose-estimation noise are highest
+  // there. Raising these makes positional matching more forgiving, but
+  // they're the most sensitive knob for false positives - cross-dance
+  // choreography mostly differs by "how far off is each joint," so widening
+  // sigma erases that signal fast. Always re-run
+  // `npm run evaluate:matcher` after touching these; widening them from
+  // {0.12, 0.16, 0.22} to {0.16, 0.20, 0.28} alone pushed the cross-dance
+  // false-positive detection rate from 0% to ~28-59% in testing.
   keypointSigma: { core: 0.12, mid: 0.16, extremity: 0.22 },
+  // Same idea as keypointSigma but for joint angles (degrees) instead of
+  // joint positions - core joints (shoulders/hips) tighter, elbows/knees
+  // ("mid") looser. Same false-positive sensitivity warning applies.
   angleSigma: { core: 18, mid: 24 },
 };
 

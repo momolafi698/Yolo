@@ -82,7 +82,7 @@ const DEFAULT_OPTIONS = {
   // cleaner match before showing anything. Use `npm run evaluate:matcher`
   // after changing this - it prints the cross-dance false-positive score
   // distribution (p90/p95/p99) so you can see how close you're cutting it.
-  minConfidence: 50,
+  minConfidence: 65,
   // Minimum number of live pose samples buffered before matching even
   // starts. Too low and single-frame noise can trigger a match; too high
   // delays the first score after the player starts moving. Tied to
@@ -340,22 +340,30 @@ export function stabilizeMatches(history, currentMatch, now, windowMs = 2200) {
 // matcher operates on. Pure/fetch-independent so it can be shared between
 // the browser catalogue loader above and offline node tooling (e.g. an
 // evaluation/calibration script) that reads the same JSON files from disk.
+//
+// Recomputes normalization from each frame's raw pixel keypoints (also
+// present in the JSON) rather than trusting the precomputed `normalized`
+// field, so catalogue (reference) poses and live poses always go through
+// the exact same normalizeKeypoints pipeline - including bone-length
+// canonicalization (see canonicalizeSkeleton below). If the two sides ever
+// drifted apart (e.g. this file's normalization changes but the
+// extract-poses.js copy that produced `normalized` doesn't), comparisons
+// would be silently wrong; recomputing here makes that impossible.
 export function prepareDance(entry) {
+  const threshold = DEFAULT_OPTIONS.keypointThreshold;
   const frames = entry.data.frames
-    .filter((frame) => {
-      if (!frame.person) return false;
-      // Reject frames whose normalization scale is below the reliable threshold.
-      // This catches existing data where shoulders were misdetected (scale ~2–14px)
-      // which would blow up all normalized coordinates.
-      const scale = frame.person.normalized?.scale ?? 0;
-      return scale >= MIN_NORM_SCALE;
+    .map((frame) => {
+      if (!frame.person?.keypoints?.length) return null;
+      const keypoints = normalizeKeypoints(frame.person.keypoints, frame.person.bbox, threshold);
+      if (!keypoints) return null;
+      return {
+        frameIndex: frame.frameIndex,
+        timestamp: frame.timestamp,
+        keypoints,
+        angles: frame.person.angles ?? {},
+      };
     })
-    .map((frame) => ({
-      frameIndex: frame.frameIndex,
-      timestamp: frame.timestamp,
-      keypoints: frame.person.normalized?.keypoints ?? [],
-      angles: frame.person.angles ?? {},
-    }));
+    .filter(Boolean);
 
   return {
     id: entry.id,
@@ -563,6 +571,55 @@ function nearestFrameIndex(frames, timestamp) {
     : low;
 }
 
+// Per-joint/per-angle breakdown for a single live-vs-reference frame pair,
+// for the debug overlay's diagnostic panel. This intentionally duplicates a
+// bit of compareKeypoints/compareAngles's looping logic rather than
+// threading a "collect details" flag through the hot per-DTW-cell
+// comparison path (compareFrame runs once per cell of the alignment search;
+// this runs once per rendered debug frame).
+export function compareFrameDetailed(liveSample, referenceFrame, options = {}) {
+  const config = mergeConfig(options);
+  const live = liveSample.keypoints;
+  const reference = referenceFrame.keypoints;
+
+  const joints = [];
+  for (let i = 0; i < Math.min(live.length, reference.length); i++) {
+    const a = live[i];
+    const b = reference[i];
+    const tier = JOINT_TIER[a.name] ?? "mid";
+    const sigma = config.keypointSigma[tier];
+    const bothVisible = visible(a, config.keypointThreshold) && visible(b, config.keypointThreshold);
+    const distance = bothVisible ? Math.hypot(a.x - b.x, a.y - b.y) : null;
+    const score = distance !== null ? 100 * Math.exp(-(distance * distance) / (2 * sigma * sigma)) : null;
+    joints.push({
+      name: a.name,
+      tier,
+      visible: bothVisible,
+      distance: distance !== null ? round(distance, 3) : null,
+      score: score !== null ? round(score, 1) : null,
+    });
+  }
+
+  const angles = ANGLE_NAMES.map((name) => {
+    const liveAngle = liveSample.angles?.[name];
+    const referenceAngle = referenceFrame.angles?.[name];
+    const available = liveAngle !== null && liveAngle !== undefined &&
+      referenceAngle !== null && referenceAngle !== undefined;
+    const tier = ANGLE_JOINT_TIER[name] ?? "mid";
+    const sigma = config.angleSigma[tier];
+    const diff = available ? Math.abs(liveAngle - referenceAngle) : null;
+    const score = diff !== null ? 100 * Math.exp(-(diff * diff) / (2 * sigma * sigma)) : null;
+    return {
+      name,
+      available,
+      diff: diff !== null ? round(diff, 1) : null,
+      score: score !== null ? round(score, 1) : null,
+    };
+  });
+
+  return { joints, angles };
+}
+
 function compareFrame(live, frame, config) {
   const pointComparison = compareKeypoints(live.keypoints, frame.keypoints, config);
   const angleScore = compareAngles(live.angles, frame.angles, config);
@@ -578,9 +635,16 @@ function compareFrame(live, frame, config) {
     };
   }
 
+  // Position now carries roughly the same information as angle (both are
+  // body-shape-invariant since canonicalizeSkeleton retargets every pose
+  // onto fixed bone lengths - see below), so this blend is no longer
+  // compensating for position being proportion-sensitive. Angle gets a
+  // slightly bigger share than before purely as a redundant cross-check
+  // (it's derived independently, straight from raw keypoints, so it still
+  // catches cases where canonicalization degraded to a fallback).
   const score = angleScore === null
     ? pointComparison.score
-    : pointComparison.score * 0.68 + angleScore * 0.32;
+    : pointComparison.score * 0.6 + angleScore * 0.4;
 
   return {
     score: round(score, 1),
@@ -688,12 +752,126 @@ function normalizeKeypoints(keypoints, bbox, threshold) {
 
   if (!scale) return null;
 
-  return keypoints.map((point) => ({
+  const normalized = keypoints.map((point) => ({
     name: point.name,
     x: (point.x - origin.x) / scale,
     y: (point.y - origin.y) / scale,
     score: point.score,
   }));
+
+  // Translation/scale invariance alone isn't enough: two people of
+  // different build performing the identical move still land on different
+  // normalized coordinates, because a longer forearm or wider hips shows up
+  // as a bigger offset even after scaling by shoulder width. Retarget onto
+  // a fixed canonical skeleton so only each bone's measured DIRECTION
+  // (i.e. the angle it's held at) survives, not its individual length.
+  return canonicalizeSkeleton(normalized, threshold);
+}
+
+// Kinematic tree used to retarget a normalized pose onto BONE_LENGTH's fixed
+// segment lengths. Order matters: parents must appear before children, since
+// each child is placed relative to its parent's already-resolved canonical
+// position. "hipMid" is the fixed origin (0,0) from normalizeKeypoints above;
+// "shoulderMid" is a virtual joint (midpoint of the shoulders) used only to
+// anchor the torso/shoulder segments - it isn't part of the final keypoints.
+const KINEMATIC_CHAIN = [
+  ["hipMid", "shoulderMid", "torso"],
+  ["shoulderMid", "leftShoulder", "shoulderHalf"],
+  ["shoulderMid", "rightShoulder", "shoulderHalf"],
+  ["hipMid", "leftHip", "hipHalf"],
+  ["hipMid", "rightHip", "hipHalf"],
+  ["leftShoulder", "leftElbow", "upperArm"],
+  ["rightShoulder", "rightElbow", "upperArm"],
+  ["leftElbow", "leftWrist", "forearm"],
+  ["rightElbow", "rightWrist", "forearm"],
+  ["leftHip", "leftKnee", "thigh"],
+  ["rightHip", "rightKnee", "thigh"],
+  ["leftKnee", "leftAnkle", "shin"],
+  ["rightKnee", "rightAnkle", "shin"],
+];
+
+// Canonical bone lengths in shoulder-width units (the same unit
+// normalizeKeypoints scales everything to - "1.0" means "one shoulder
+// width"). Values come from standard anthropometric segment-length ratios
+// (fractions of total body height; see Winter's "Biomechanics and Motor
+// Control of Human Movement" segment-parameter tables), converted to
+// shoulder-width units using biacromial (shoulder) width =~ 0.259x height:
+//   upperArm 0.186/0.259, forearm 0.146/0.259, thigh 0.245/0.259,
+//   shin 0.246/0.259, torso (hip-to-shoulder) 0.288/0.259, hipHalf half of
+//   0.191/0.259 (bi-iliac hip width).
+// Exact real-world precision doesn't matter much - what matters is that
+// live and reference poses are retargeted onto the SAME lengths, so an
+// individual player's actual proportions stop being a source of mismatch.
+// Tweak a value here if a particular limb consistently reads too
+// short/long relative to how it visibly looks on screen.
+export const BONE_LENGTH = {
+  torso: 1.11,
+  shoulderHalf: 0.5,
+  hipHalf: 0.37,
+  upperArm: 0.72,
+  forearm: 0.56,
+  thigh: 0.95,
+  shin: 0.95,
+};
+
+function unitVector(dx, dy) {
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return null;
+  return { x: dx / len, y: dy / len };
+}
+
+function actualMidpoint(a, b, threshold) {
+  const aVisible = visible(a, threshold);
+  const bVisible = visible(b, threshold);
+  if (aVisible && bVisible) return midpoint(a, b);
+  if (aVisible) return { x: a.x, y: a.y };
+  if (bVisible) return { x: b.x, y: b.y };
+  return null;
+}
+
+// Rebuilds a normalized pose so every bone in KINEMATIC_CHAIN has the given
+// fixed length, while keeping each bone's actual measured direction. Falls
+// back to the original (uncanonicalized) position for any joint whose
+// parent/child data is missing or whose measured bone has ~0 length (no
+// direction to preserve) - missing data degrades to the pre-canonicalization
+// behavior rather than inventing a joint from nothing. Exported (parametrized
+// by boneLengths rather than hardcoded to BONE_LENGTH) so evaluation tooling
+// can also synthesize different-proportioned bodies for testing.
+export function retargetSkeleton(keypoints, boneLengths, threshold) {
+  const actual = new Map(keypoints.map((point) => [point.name, point]));
+  actual.set("hipMid", { x: 0, y: 0, score: 1 });
+  const shoulderMid = actualMidpoint(actual.get("leftShoulder"), actual.get("rightShoulder"), threshold);
+  if (shoulderMid) actual.set("shoulderMid", shoulderMid);
+
+  const canonical = new Map();
+  canonical.set("hipMid", { x: 0, y: 0 });
+
+  for (const [parentName, childName, boneKey] of KINEMATIC_CHAIN) {
+    const parentActual = actual.get(parentName);
+    const childActual = actual.get(childName);
+    const parentCanonical = canonical.get(parentName);
+    if (!parentActual || !childActual || !parentCanonical) continue;
+
+    const dir = unitVector(childActual.x - parentActual.x, childActual.y - parentActual.y);
+    canonical.set(
+      childName,
+      dir
+        ? {
+            x: parentCanonical.x + dir.x * boneLengths[boneKey],
+            y: parentCanonical.y + dir.y * boneLengths[boneKey],
+          }
+        : { x: childActual.x, y: childActual.y },
+    );
+  }
+
+  return keypoints.map((point) => {
+    const target = canonical.get(point.name);
+    return target ? { name: point.name, x: target.x, y: target.y, score: point.score } : point;
+  });
+}
+
+function canonicalizeSkeleton(keypoints, threshold) {
+  return retargetSkeleton(keypoints, BONE_LENGTH, threshold);
 }
 
 function calculateAngles(keypoints, threshold) {

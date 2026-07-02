@@ -2,7 +2,17 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { matchPoseSequenceToCatalogue, prepareDance } from "../src/utils/catalogue-matcher.js";
+import {
+  matchPoseSequenceToCatalogue,
+  prepareDance,
+  retargetSkeleton,
+  BONE_LENGTH,
+} from "../src/utils/catalogue-matcher.js";
+
+// Must match DEFAULT_OPTIONS.keypointThreshold in catalogue-matcher.js -
+// only used here to decide which joints count as "visible" when building a
+// synthetic body's virtual shoulder/hip midpoints.
+const KEYPOINT_THRESHOLD = 0.2;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
@@ -36,6 +46,11 @@ Computes score/detection distributions for:
     jitter, occlusion) - models the primary single-dance/audio-synced path.
   - false-positive matches: a dance's frames replayed against every other
     dance in the catalogue - models cross-dance confusion.
+  - body-shape sensitivity: a dance's own frames retargeted onto randomized
+    synthetic-dancer bone lengths (same choreography/angles, different
+    proportions), scored both with and without the canonicalizeSkeleton
+    retargeting step - shows how much of the "different body, same dance"
+    problem that step actually fixes, instead of just asserting it does.
 
 Re-run this after any change to matching thresholds/formulas in
 src/utils/catalogue-matcher.js to confirm true/false separation improves,
@@ -183,6 +198,87 @@ function computeTrueScores(catalogue, config, rng) {
   return results;
 }
 
+// Body-shape variance severities: each draws one fixed set of per-bone
+// length multipliers ("one synthetic dancer's proportions") and applies it
+// to every frame of the sequence - modeling a real player whose build
+// differs from the reference performer's, as opposed to SEVERITIES' frame-
+// by-frame jitter which models noise within a single body. sigma is the
+// std-dev of the per-bone length multiplier (0.15 =~ realistic adult body
+// variation, 0.35 =~ an extreme/mismatched build).
+const BODY_SHAPE_SIGMAS = { realistic: 0.15, extreme: 0.35 };
+
+function randomBodyBoneLengths(rng, sigma) {
+  const lengths = {};
+  for (const [bone, base] of Object.entries(BONE_LENGTH)) {
+    const factor = 1 + gaussianRandom(rng) * sigma;
+    lengths[bone] = base * Math.max(0.4, factor);
+  }
+  return lengths;
+}
+
+// Builds a window representing a differently-proportioned dancer performing
+// the exact same choreography (same angles/directions each frame - only
+// bone lengths change). `canonicalize` toggles whether the result is
+// re-retargeted onto BONE_LENGTH afterward, i.e. whether this window went
+// through the same canonicalizeSkeleton step a real live camera pose does
+// (see normalizeKeypoints in catalogue-matcher.js) - set it false to see how
+// the matcher would have scored this exact same synthetic dancer before
+// that step existed.
+function buildBodyVariedWindow(dance, startIndex, frameCount, bodyLengths, canonicalize, rng) {
+  const frames = dance.frames.slice(startIndex, startIndex + frameCount);
+  if (frames.length < frameCount) return null;
+
+  return frames.map((frame) => {
+    const varied = retargetSkeleton(frame.keypoints, bodyLengths, KEYPOINT_THRESHOLD);
+    const jittered = jitterKeypoints(varied, SEVERITIES.low.posSigma, SEVERITIES.low.dropProb, rng);
+    const keypoints = canonicalize
+      ? retargetSkeleton(jittered, BONE_LENGTH, KEYPOINT_THRESHOLD)
+      : jittered;
+    return {
+      timestamp: frame.timestamp + SEVERITIES.low.reactionLag,
+      keypoints,
+      angles: frame.angles,
+    };
+  });
+}
+
+function computeBodyShapeScores(catalogue, config, rng) {
+  const results = {};
+  for (const sigmaName of Object.keys(BODY_SHAPE_SIGMAS)) {
+    results[`${sigmaName}/no-canonicalization`] = [];
+    results[`${sigmaName}/with-canonicalization`] = [];
+  }
+
+  const BODIES_PER_DANCE = 3;
+
+  for (const dance of catalogue.dances) {
+    const sampledFps = dance.sampledFps || 30;
+    const frameCount = Math.round(config.windowSeconds * sampledFps);
+    const stepFrames = Math.max(1, Math.round(config.trueStepSeconds * 4 * sampledFps));
+
+    for (const [sigmaName, sigma] of Object.entries(BODY_SHAPE_SIGMAS)) {
+      for (let bodyIndex = 0; bodyIndex < BODIES_PER_DANCE; bodyIndex++) {
+        const bodyLengths = randomBodyBoneLengths(rng, sigma);
+
+        for (let start = 0; start + frameCount <= dance.frames.length; start += stepFrames) {
+          for (const canonicalize of [false, true]) {
+            const window = buildBodyVariedWindow(dance, start, frameCount, bodyLengths, canonicalize, rng);
+            if (!window) continue;
+
+            const match = matchPoseSequenceToCatalogue(window, { dances: [dance] }, { syncToTimeline: true });
+            if (match.best) {
+              const key = `${sigmaName}/${canonicalize ? "with" : "no"}-canonicalization`;
+              results[key].push({ score: match.best.score, detected: match.detected });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
 function computeFalseScores(catalogue, config, rng) {
   const scores = [];
 
@@ -266,6 +362,14 @@ async function main() {
   console.log("\n=== False-positive distribution (cross-dance, low-severity noise) ===");
   const falseScores = computeFalseScores(catalogue, args, rng);
   summarize("false/cross-dance", falseScores);
+
+  console.log(
+    "\n=== Body-shape sensitivity (same choreography, randomized synthetic dancer proportions) ===",
+  );
+  const bodyShapeScores = computeBodyShapeScores(catalogue, args, rng);
+  for (const [label, entries] of Object.entries(bodyShapeScores)) {
+    summarize(`body-shape/${label}`, entries);
+  }
 
   console.log(
     "\nThresholds (minConfidence, minCoverageFraction, minMargin, syncBandSeconds, " +

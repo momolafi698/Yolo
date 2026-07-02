@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import classes from "./utils/yolo_classes.json";
 import { renderOverlay } from "./utils/render-overlay";
 import {
+  compareFrameDetailed,
   createPoseSample,
   loadPoseCatalogue,
   matchPoseSequenceToCatalogue,
@@ -198,6 +199,26 @@ function createDebugTargetPrediction(
   };
 }
 
+// Ungated, per-joint diagnostic for the debug panel: uses the exact same
+// (already normalized+canonicalized) live sample the matcher just scored,
+// compared against whichever reference frame the alignment actually locked
+// onto - so this reflects the real comparison the matcher made, not a
+// re-derived approximation of it.
+function createDebugBreakdown(dance, match, liveSample) {
+  if (!dance?.frames?.length || !liveSample) return null;
+
+  const targetTimestamp = match?.alignedTimestamp ?? liveSample.timestamp;
+  const targetFrameIndex = match?.alignedFrameIndex ?? null;
+  const frame = findNearestCatalogueFrame(
+    dance.frames,
+    Math.max(0, targetTimestamp),
+    targetFrameIndex,
+  );
+
+  if (!frame?.keypoints?.length) return null;
+  return compareFrameDetailed(liveSample, frame);
+}
+
 let mirrorCanvas = null;
 let mirrorCtx = null;
 
@@ -220,6 +241,7 @@ function App() {
   const [activeFeature, setActiveFeature] = useState(null);
   const [selectedDanceId, setSelectedDanceId] = useState(null);
   const [debugTargetOverlay, setDebugTargetOverlay] = useState(false);
+  const [debugBreakdown, setDebugBreakdown] = useState(null);
   const [gameState, setGameState] = useState("idle");
   const [countdown, setCountdown] = useState(COUNTDOWN_SECONDS);
   const [sequenceSampleCount, setSequenceSampleCount] = useState(0);
@@ -271,6 +293,10 @@ function App() {
   useEffect(() => {
     danceScoreRef.current = danceScore;
   }, [danceScore]);
+
+  useEffect(() => {
+    if (!debugTargetOverlay) setDebugBreakdown(null);
+  }, [debugTargetOverlay]);
 
   useEffect(() => {
     activeFeatureRef.current = activeFeature;
@@ -350,6 +376,7 @@ function App() {
     setStableMatch(null);
     setDancePrecision(0);
     setSequenceSampleCount(0);
+    setDebugBreakdown(null);
   }, []);
 
   const prepareCountdown = useCallback(() => {
@@ -653,6 +680,8 @@ function App() {
                 { pose: DEBUG_TARGET_COLORS },
               );
             }
+
+            setDebugBreakdown(createDebugBreakdown(debugDance, instantMatch.best, sample));
           }
 
           setDancePrecision(precision);
@@ -1206,6 +1235,56 @@ function App() {
               onChange={(event) => setDebugTargetOverlay(event.target.checked)}
             />
           </label>
+          {debugTargetOverlay && debugBreakdown && (
+            <div className="rounded-lg border border-cyan-500/20 bg-[#050818]/70 px-3 py-2 flex flex-col gap-2">
+              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                Diagnostic articulations (score / distance)
+              </span>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-mono">
+                {debugBreakdown.joints.map((joint) => (
+                  <div key={joint.name} className="flex justify-between gap-2">
+                    <span className="text-slate-400 truncate">{joint.name}</span>
+                    <span
+                      className={
+                        joint.score === null
+                          ? "text-slate-600"
+                          : joint.score >= 70
+                            ? "text-emerald-400"
+                            : joint.score >= 40
+                              ? "text-amber-300"
+                              : "text-red-400"
+                      }
+                    >
+                      {joint.score === null ? "n/a" : `${joint.score.toFixed(0)} (${joint.distance.toFixed(2)})`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider mt-1">
+                Angles (score / ecart en degres)
+              </span>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] font-mono">
+                {debugBreakdown.angles.map((angle) => (
+                  <div key={angle.name} className="flex justify-between gap-2">
+                    <span className="text-slate-400 truncate">{angle.name}</span>
+                    <span
+                      className={
+                        angle.score === null
+                          ? "text-slate-600"
+                          : angle.score >= 70
+                            ? "text-emerald-400"
+                            : angle.score >= 40
+                              ? "text-amber-300"
+                              : "text-red-400"
+                      }
+                    >
+                      {angle.score === null ? "n/a" : `${angle.score.toFixed(0)} (${angle.diff.toFixed(0)}°)`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {activeFeature === "video" && (
             <p className="text-xs text-slate-400 truncate">
               Source video : {videoName || "video locale"}

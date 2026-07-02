@@ -560,6 +560,10 @@ function App() {
     setCoachComments([
       "Prepare-toi. Detection temporelle dans 5 secondes.",
     ]);
+    if (overlayRef.current) {
+      const ctx = overlayRef.current.getContext("2d");
+      ctx?.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
+    }
   }, [resetLiveComparison, abortRecording]);
 
   const stopMusic = useCallback(() => {
@@ -1423,6 +1427,12 @@ function App() {
   const startCameraLoop = useCallback(() => {
     startMediaLoop("camera", cameraRef);
   }, [startMediaLoop]);
+
+  useEffect(() => {
+    if (activeFeature === "camera" && (gameState === "countdown" || gameState === "detecting" || gameState === "waiting_for_person")) {
+      startCameraLoop();
+    }
+  }, [activeFeature, gameState, startCameraLoop]);
 
   const startVideoLoop = useCallback(() => {
     startMediaLoop("video", videoRef);

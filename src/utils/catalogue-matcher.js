@@ -144,6 +144,12 @@ const DEFAULT_OPTIONS = {
   // single reference frame matches that pose best and coast on it for the
   // whole window.
   stepPenalty: 0.06,
+  // Reference videos can have unusable stretches (close-up shots, failed
+  // detections) that leave holes in the frame timeline. A live sample whose
+  // expected reference time falls more than this far from any existing
+  // frame is excluded from scoring entirely - better no score than being
+  // graded against a different moment of the song.
+  referenceGapToleranceSeconds: 0.75,
   // Tolerance (degrees) on each bone's direction error. This is the main
   // "how forgiving is a pose" knob. 30 deg means a bone held ~30 deg off
   // still earns ~61% of its points; ~60 deg off earns ~14%.
@@ -177,6 +183,11 @@ const DEFAULT_OPTIONS = {
   // pose the choreography holds is correct.
   motionRatioFloor: 0.6,
   motionPenaltyMinRefDegPerSec: 12,
+  // Live pose estimates jitter, and differentiating jitter looks like ~10
+  // deg/s of motion even on a player standing perfectly still. Deducted
+  // from the live side before computing the ratio so "frozen" reads as
+  // frozen; the reference (extracted from stable video) needs no deduction.
+  liveMotionNoiseFloorDegPerSec: 8,
   // Raw similarity -> displayed percentage mapping. Raw similarity has a
   // high floor (two random dance poses share gravity, a standing torso,
   // legs pointing down...), so it's stretched: scoreFloor maps to 0% and
@@ -510,7 +521,14 @@ function attachVelocities(sequence, config) {
 }
 
 // Mirror a sample's features (swap left/right bones, negate x, flip angular
-// velocity sign) - equivalent to having mirrored the input image.
+// velocity sign) - equivalent to having mirrored the input image. Works on
+// anything carrying {bones, vel}, including prepared reference frames -
+// exported (as mirrorPoseFeatures) so the debug overlay can compare in the
+// same chirality the matcher picked.
+export function mirrorPoseFeatures(sample) {
+  return mirrorSample(sample);
+}
+
 function mirrorSample(sample) {
   const bones = {};
   for (const name of BONE_NAMES) {
@@ -688,9 +706,8 @@ function findBestSequence(samples, mirroredSamples, dance, config) {
 function alignSyncedSequence(samples, dance, config) {
   const sampledFps = dance.sampledFps || 30;
   const bandFrames = Math.max(1, Math.round(config.syncBandSeconds * sampledFps));
-  const anchorForRow = (i) => nearestFrameIndex(dance.frames, samples[i].timestamp);
 
-  return runAlignment(samples, dance, config, anchorForRow, bandFrames);
+  return runAlignment(samples, dance, config, (i) => samples[i].timestamp, bandFrames);
 }
 
 // Fallback path: no dance/audio clock, so coarsely scan candidate start
@@ -709,20 +726,34 @@ function alignFallbackSequence(samples, dance, config) {
 
   let best = null;
   for (let start = minStart; start <= maxStart; start += step) {
-    const anchorForRow = (i) => nearestFrameIndex(
-      dance.frames,
-      start + (samples[i].timestamp - firstLiveTimestamp),
-    );
-    const result = runAlignment(samples, dance, config, anchorForRow, bandFrames);
+    const anchorTimeForRow = (i) => start + (samples[i].timestamp - firstLiveTimestamp);
+    const result = runAlignment(samples, dance, config, anchorTimeForRow, bandFrames);
     if (!best || result.rawScore > best.rawScore) best = result;
   }
 
   return best ?? emptySequenceResult(dance);
 }
 
-function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
+function runAlignment(samples, dance, config, anchorTimeForRow, bandFrames) {
   const frames = dance.frames;
   const cellCache = new Map();
+
+  // Resolve each live sample's expected reference position, and mark rows
+  // whose expected time falls into a hole in the reference timeline (no
+  // frame within referenceGapToleranceSeconds) as unusable: they still pass
+  // through the DTW (band continuity) but are excluded from scoring.
+  const anchorIndex = new Int32Array(samples.length);
+  const rowUsable = new Array(samples.length);
+  let usableRows = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const anchorTime = anchorTimeForRow(i);
+    const j = nearestFrameIndex(frames, anchorTime);
+    anchorIndex[i] = j;
+    rowUsable[i] = Math.abs(frames[j].timestamp - anchorTime) <= config.referenceGapToleranceSeconds;
+    if (rowUsable[i]) usableRows += 1;
+  }
+
+  if (usableRows === 0) return emptySequenceResult(dance);
 
   const cost = (i, j) => {
     const comparison = compareFrame(samples[i], frames[j], config);
@@ -734,7 +765,7 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
     n: samples.length,
     m: frames.length,
     cost,
-    anchorForRow,
+    anchorForRow: (i) => anchorIndex[i],
     bandRadius: bandFrames,
     stepPenalty: config.stepPenalty,
   });
@@ -756,8 +787,8 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
   const liveMotions = [];
   const refMotions = [];
 
-  for (const comparison of rowResult.values()) {
-    if (!comparison?.informative) continue;
+  for (const [i, comparison] of rowResult.entries()) {
+    if (!rowUsable[i] || !comparison?.informative) continue;
     informativeRows += 1;
     scoreSum += comparison.score;
     staticSum += comparison.staticScore;
@@ -774,7 +805,7 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
   if (informativeRows === 0) return emptySequenceResult(dance);
 
   const totalDuration = samples.at(-1).timestamp - samples[0].timestamp;
-  const informativeCoverageFraction = informativeRows / samples.length;
+  const informativeCoverageFraction = informativeRows / usableRows;
   const coverageSeconds = totalDuration > 0
     ? informativeCoverageFraction * totalDuration
     : 0;
@@ -792,7 +823,11 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
   if (refMotions.length > 0) {
     const refMotionMedian = median(refMotions);
     if (refMotionMedian >= config.motionPenaltyMinRefDegPerSec) {
-      motionRatio = median(liveMotions) / refMotionMedian;
+      const liveMotionMedian = Math.max(
+        0,
+        median(liveMotions) - config.liveMotionNoiseFloorDegPerSec,
+      );
+      motionRatio = liveMotionMedian / refMotionMedian;
       motionPenalty = clamp(motionRatio / config.motionRatioFloor, 0, 1);
     }
   }
@@ -965,6 +1000,13 @@ export function retargetSkeleton(keypoints, boneLengths, threshold) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function median(values) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 function midpoint(a, b) {

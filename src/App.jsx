@@ -7,6 +7,7 @@ import {
   createPoseSample,
   loadPoseCatalogue,
   matchPoseSequenceToCatalogue,
+  mirrorPoseFeatures,
   stabilizeMatches,
 } from "./utils/catalogue-matcher";
 
@@ -41,22 +42,61 @@ const DEFAULT_MODEL_CONFIG = {
 const COUNTDOWN_SECONDS = 5;
 const SEQUENCE_WINDOW_SECONDS = 4;
 const AUDIO_SYNC_OFFSET_SECONDS = 0;
-const DEBUG_TARGET_COLORS = {
-  bboxColor: "rgba(34, 211, 238, 0.95)",
-  labelBackground: "rgba(8, 145, 178, 0.85)",
-  skeletonColor: "rgba(34, 211, 238, 0.95)",
-  keypointColor: "rgba(244, 114, 182, 0.95)",
-  skeletonLineWidth: 3,
-  label: "target",
-};
-const DEBUG_TARGET_SCALE = 0.5;
-const DEBUG_TARGET_X_OFFSET = -100;
 const POSE_KEYPOINTS = {
   leftShoulder: 5,
   rightShoulder: 6,
   leftHip: 11,
   rightHip: 12,
 };
+
+// name -> COCO-17 index, for looking up live keypoints by joint name.
+const KEYPOINT_INDEX = {
+  nose: 0,
+  leftEye: 1,
+  rightEye: 2,
+  leftEar: 3,
+  rightEar: 4,
+  leftShoulder: 5,
+  rightShoulder: 6,
+  leftElbow: 7,
+  rightElbow: 8,
+  leftWrist: 9,
+  rightWrist: 10,
+  leftHip: 11,
+  rightHip: 12,
+  leftKnee: 13,
+  rightKnee: 14,
+  leftAnkle: 15,
+  rightAnkle: 16,
+};
+
+const MIRROR_JOINT = Object.fromEntries(
+  Object.keys(KEYPOINT_INDEX).map((name) => {
+    if (name.startsWith("left")) return [name, `right${name.slice(4)}`];
+    if (name.startsWith("right")) return [name, `left${name.slice(5)}`];
+    return [name, name];
+  }),
+);
+
+// The scored segments drawn by the ghost overlay - matches the matcher's
+// BONES (arms/legs; torso is drawn thin, it barely counts in the score).
+const GHOST_BONES = [
+  { name: "leftUpperArm", a: "leftShoulder", b: "leftElbow" },
+  { name: "rightUpperArm", a: "rightShoulder", b: "rightElbow" },
+  { name: "leftForearm", a: "leftElbow", b: "leftWrist" },
+  { name: "rightForearm", a: "rightElbow", b: "rightWrist" },
+  { name: "leftThigh", a: "leftHip", b: "leftKnee" },
+  { name: "rightThigh", a: "rightHip", b: "rightKnee" },
+  { name: "leftShin", a: "leftKnee", b: "leftAnkle" },
+  { name: "rightShin", a: "rightKnee", b: "rightAnkle" },
+];
+
+function ghostBoneColor(score) {
+  if (score === null || score === undefined) return "rgba(148, 163, 184, 0.55)";
+  if (score >= 70) return "rgba(52, 211, 153, 0.9)";
+  if (score >= 40) return "rgba(251, 191, 36, 0.9)";
+  return "rgba(248, 113, 113, 0.95)";
+}
 
 function getHighestScorePose(results) {
   if (!Array.isArray(results) || results.length === 0) {
@@ -148,72 +188,98 @@ function getPoseProjectionAnchor(pose) {
   return scale ? { origin, scale } : null;
 }
 
-function createDebugTargetPrediction(
-  dance,
-  detectedPose,
-  elapsedSeconds,
-  canvas,
-) {
-  if (!dance?.frames?.length || !detectedPose?.keypoints || !canvas) return null;
-
-  // Keep the visible target locked to the media clock. The diagnostic panel
-  // can still inspect the DTW-aligned frame, but the overlay should show the
-  // pose expected at the current audio/video time.
-  const targetTimestamp = elapsedSeconds;
-  const frame = findNearestCatalogueFrame(
-    dance.frames,
-    Math.max(0, targetTimestamp),
-  );
-  const anchor = getPoseProjectionAnchor(detectedPose);
-
-  if (!frame?.keypoints?.length || !anchor) return null;
-
-  const keypoints = frame.keypoints.map((point) => ({
-    name: point.name,
-    x: anchor.origin.x + DEBUG_TARGET_X_OFFSET + point.x * anchor.scale * DEBUG_TARGET_SCALE,
-    y: anchor.origin.y + point.y * anchor.scale * DEBUG_TARGET_SCALE,
-    score: point.score ?? 1,
-  }));
-  const visiblePoints = keypoints.filter((point) => isVisibleKeypoint(point, 0.5));
-
-  if (visiblePoints.length === 0) return null;
-
-  const minX = Math.min(...visiblePoints.map((point) => point.x));
-  const minY = Math.min(...visiblePoints.map((point) => point.y));
-  const maxX = Math.max(...visiblePoints.map((point) => point.x));
-  const maxY = Math.max(...visiblePoints.map((point) => point.y));
-  const padding = Math.max(8, Math.min(canvas.width, canvas.height) * 0.02);
-
-  return {
-    bbox: [
-      Math.max(0, minX - padding),
-      Math.max(0, minY - padding),
-      Math.min(canvas.width, maxX + padding) - Math.max(0, minX - padding),
-      Math.min(canvas.height, maxY + padding) - Math.max(0, minY - padding),
-    ],
-    score: 1,
-    keypoints,
-  };
-}
-
-// Ungated, per-joint diagnostic for the debug panel: uses the exact same
-// (already normalized+canonicalized) live sample the matcher just scored,
-// compared against whichever reference frame the alignment actually locked
-// onto - so this reflects the real comparison the matcher made, not a
-// re-derived approximation of it.
-function createDebugBreakdown(dance, match, liveSample) {
+// Draws the expected pose as a "ghost" skeleton superimposed on the live
+// player (anchored to their hips, scaled to their shoulder width), each limb
+// colored by how well the player currently matches it, with a dashed line
+// from the player's joint to where it should be for badly-off limbs.
+// Honors the mirror chirality the matcher picked, so the ghost always shows
+// the version of the move the player is being scored against. Returns the
+// per-bone breakdown for the diagnostic panel (or null).
+function drawTargetGhost(ctx, dance, livePose, liveSample, elapsedSeconds, mirrored) {
   if (!dance?.frames?.length || !liveSample) return null;
 
-  const targetTimestamp = match?.alignedTimestamp ?? liveSample.timestamp;
-  const targetFrameIndex = match?.alignedFrameIndex ?? null;
-  const frame = findNearestCatalogueFrame(
-    dance.frames,
-    Math.max(0, targetTimestamp),
-    targetFrameIndex,
-  );
+  const frame = findNearestCatalogueFrame(dance.frames, Math.max(0, elapsedSeconds));
+  if (!frame) return null;
 
-  if (!frame?.keypoints?.length) return null;
-  return compareFrameDetailed(liveSample, frame);
+  const refFeatures = mirrored ? mirrorPoseFeatures(frame) : frame;
+  const details = compareFrameDetailed(liveSample, refFeatures);
+  details.mirrored = Boolean(mirrored);
+
+  const anchor = getPoseProjectionAnchor(livePose);
+  if (!frame.keypoints?.length || !anchor) return details;
+
+  // Reference keypoints are hip-centered / shoulder-width units; project
+  // them onto the live player's hips and scale.
+  const ghost = new Map();
+  for (const point of frame.keypoints) {
+    if (!isVisibleKeypoint(point, 0.2)) continue;
+    const name = mirrored ? MIRROR_JOINT[point.name] ?? point.name : point.name;
+    const x = mirrored ? -point.x : point.x;
+    ghost.set(name, {
+      x: anchor.origin.x + x * anchor.scale,
+      y: anchor.origin.y + point.y * anchor.scale,
+    });
+  }
+  if (ghost.size === 0) return details;
+
+  const boneScore = new Map(details.bones.map((bone) => [bone.name, bone.score]));
+
+  // Torso, thin - context only.
+  const leftShoulderGhost = ghost.get("leftShoulder");
+  const rightShoulderGhost = ghost.get("rightShoulder");
+  if (leftShoulderGhost && rightShoulderGhost) {
+    const shoulderMid = {
+      x: (leftShoulderGhost.x + rightShoulderGhost.x) / 2,
+      y: (leftShoulderGhost.y + rightShoulderGhost.y) / 2,
+    };
+    ctx.strokeStyle = ghostBoneColor(boneScore.get("torso"));
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(anchor.origin.x, anchor.origin.y);
+    ctx.lineTo(shoulderMid.x, shoulderMid.y);
+    ctx.moveTo(leftShoulderGhost.x, leftShoulderGhost.y);
+    ctx.lineTo(rightShoulderGhost.x, rightShoulderGhost.y);
+    ctx.stroke();
+  }
+
+  // Limbs, thick, colored by their current match score.
+  for (const bone of GHOST_BONES) {
+    const a = ghost.get(bone.a);
+    const b = ghost.get(bone.b);
+    if (!a || !b) continue;
+
+    ctx.strokeStyle = ghostBoneColor(boneScore.get(bone.name));
+    ctx.lineWidth = 5;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, 4, 0, 2 * Math.PI);
+    ctx.fill();
+
+    // For badly-off limbs, point from the player's actual joint to where
+    // the choreography wants it.
+    const score = boneScore.get(bone.name);
+    if (score !== null && score !== undefined && score < 40) {
+      const liveJoint = livePose?.keypoints?.[KEYPOINT_INDEX[bone.b]];
+      if (isVisibleKeypoint(liveJoint, 0.2)) {
+        ctx.strokeStyle = "rgba(248, 113, 113, 0.7)";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(liveJoint.x, liveJoint.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+  }
+
+  return details;
 }
 
 let mirrorCanvas = null;
@@ -658,25 +724,15 @@ function App() {
           if (debugTargetOverlay) {
             const debugDanceId = selectedDance?.id ?? instantMatch.best?.id ?? selectedDanceId;
             const debugDance = catalogue.dances.find((dance) => dance.id === debugDanceId);
-            const debugPrediction = createDebugTargetPrediction(
+            const ghostDetails = drawTargetGhost(
+              overlayCtx,
               debugDance,
               targetPose,
+              sample,
               elapsedSeconds,
-              overlayCtx.canvas,
+              Boolean(instantMatch.best?.mirrored),
             );
-
-            if (debugPrediction) {
-              renderOverlay(
-                [debugPrediction],
-                null,
-                overlayCtx,
-                "pose",
-                DEFAULT_MODEL_CONFIG.classes,
-                { pose: DEBUG_TARGET_COLORS },
-              );
-            }
-
-            setDebugBreakdown(createDebugBreakdown(debugDance, instantMatch.best, sample));
+            setDebugBreakdown(ghostDetails);
           }
 
           setDancePrecision(precision);
@@ -1226,7 +1282,9 @@ function App() {
           <label className="flex items-center justify-between gap-3 rounded-lg border border-cyan-500/20 bg-[#050818]/70 px-3 py-2">
             <span className="flex flex-col">
               <span className="text-sm font-bold text-slate-200">Debug pose cible</span>
-              <span className="text-xs text-slate-500">Superpose la pose attendue en cyan/rose.</span>
+              <span className="text-xs text-slate-500">
+                Squelette attendu superpose sur toi : vert = bon, orange = moyen, rouge = a corriger.
+              </span>
             </span>
             <input
               type="checkbox"
@@ -1267,6 +1325,7 @@ function App() {
                     ? "n/a"
                     : debugBreakdown.summary.dynamicScore.toFixed(0)}{" "}
                   · segments {debugBreakdown.summary.comparableBones}
+                  {debugBreakdown.mirrored ? " · miroir" : ""}
                 </span>
               )}
             </div>

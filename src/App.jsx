@@ -1775,26 +1775,26 @@ function App() {
 
               {/* Immersive Score HUD overlay inside the camera screen */}
               {activeFeature === "camera" && (gameState === "detecting" || gameState === "countdown" || gameState === "waiting_for_person") && (
-                <div className="absolute bottom-4 left-4 right-4 z-40 flex items-center justify-between bg-black/60 backdrop-blur-md border border-fuchsia-500/30 rounded-2xl p-4 shadow-[0_0_30px_rgba(217,70,239,0.25)] gap-4 transition-all duration-300">
+                <div className="absolute bottom-6 left-6 right-6 z-40 flex items-center justify-between bg-black/65 backdrop-blur-md border border-fuchsia-500/30 rounded-2xl p-5 md:p-6 shadow-[0_0_35px_rgba(217,70,239,0.3)] gap-6 transition-all duration-300">
                   <div className="flex flex-col min-w-0 flex-1 text-left">
-                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">
+                    <span className="text-xs uppercase font-extrabold text-slate-400 tracking-wider">
                       Chanson
                     </span>
-                    <span className="font-display text-base text-cyan-neon truncate font-black">
+                    <span className="font-display text-lg md:text-2.5xl text-cyan-neon truncate font-black">
                       {selectedDanceId
                         ? catalogue?.dances?.find((d) => d.id === selectedDanceId)?.title ?? "Détection..."
                         : "Recherche..."}
                     </span>
                   </div>
 
-                  <div className="flex-1 max-w-xs flex flex-col gap-1 items-center">
-                    <span className="text-[9px] uppercase font-extrabold text-slate-400 tracking-wider flex items-center gap-1.5">
+                  <div className="flex-1 max-w-xs flex flex-col gap-1.5 items-center">
+                    <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider flex items-center gap-1.5">
                       <span>Évolution</span>
                       {audioTimeLeft !== null && (
-                        <span className="text-fuchsia-400 font-black animate-pulse">• {formatTime(audioTimeLeft)}</span>
+                        <span className="text-fuchsia-400 font-black animate-pulse text-xs">• {formatTime(audioTimeLeft)}</span>
                       )}
                     </span>
-                    <div className="flex items-end gap-0.5 h-8 w-full bg-black/40 rounded-lg p-1 overflow-hidden justify-center shadow-inner">
+                    <div className="flex items-end gap-0.5 h-11 w-full bg-black/40 rounded-lg p-1.5 overflow-hidden justify-center shadow-inner">
                       {sessionPrecisionsRef.current.slice(-25).map((p, idx) => (
                         <div
                           key={idx}
@@ -1818,7 +1818,7 @@ function App() {
                           cameraContainerRef.current?.requestFullscreen().catch((err) => console.warn(err));
                         }
                       }}
-                      className="bg-violet-600/30 hover:bg-violet-600/60 border border-violet-500/40 hover:border-violet-500/80 rounded-xl p-2 flex items-center justify-center transition-all cursor-pointer shadow-md text-white select-none mr-1"
+                      className="bg-violet-600/30 hover:bg-violet-600/60 border border-violet-500/40 hover:border-violet-500/80 rounded-xl p-2.5 flex items-center justify-center transition-all cursor-pointer shadow-md text-white select-none mr-1"
                       title={isFullscreen ? "Quitter le plein écran" : "Plein écran"}
                     >
                       {isFullscreen ? (
@@ -1833,15 +1833,15 @@ function App() {
                         </svg>
                       )}
                     </button>
-                    <div className="bg-[#050818]/80 border border-violet-500/20 rounded-lg px-2.5 py-1 flex flex-col items-center min-w-[70px]">
-                      <span className="text-[8px] text-slate-400 uppercase font-bold">Précision</span>
-                      <span className="text-sm font-black text-cyan-400 font-display">
+                    <div className="bg-[#050818]/80 border border-violet-500/20 rounded-lg px-3.5 py-1.5 flex flex-col items-center min-w-[85px]">
+                      <span className="text-[9px] text-slate-400 uppercase font-bold">Précision</span>
+                      <span className="text-base md:text-lg font-black text-cyan-400 font-display">
                         {Math.round(dancePrecision)}%
                       </span>
                     </div>
-                    <div className="bg-[#050818]/80 border border-violet-500/20 rounded-lg px-2.5 py-1 flex flex-col items-center min-w-[70px]">
-                      <span className="text-[8px] text-slate-400 uppercase font-bold">Score</span>
-                      <span className="text-sm font-black text-fuchsia-400 font-display">
+                    <div className="bg-[#050818]/80 border border-violet-500/20 rounded-lg px-3.5 py-1.5 flex flex-col items-center min-w-[85px]">
+                      <span className="text-[9px] text-slate-400 uppercase font-bold">Score</span>
+                      <span className="text-base md:text-lg font-black text-fuchsia-400 font-display">
                         {danceScore}%
                       </span>
                     </div>

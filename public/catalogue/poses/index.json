@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "createdAt": "2026-07-01T14:36:46.814Z",
+  "createdAt": "2026-07-02T11:35:28.438Z",
   "outputDirectory": "public/catalogue/poses",
   "dances": [
     {
@@ -79,6 +79,17 @@
       "detectedFrames": 286,
       "sampledFrames": 287,
       "detectionRate": 0.9965
+    },
+    {
+      "id": "allday-project-wicked-mirrored-dance-cover-byfdrjz5ngk",
+      "title": "ALLDAY PROJECT - ‘WICKED’ 🖤 Mirrored Dance Cover [bYFDRJz5nGk]",
+      "file": "allday-project-wicked-mirrored-dance-cover-byfdrjz5ngk.poses.json",
+      "source": "videos/ALLDAY PROJECT - ‘WICKED’ 🖤 Mirrored Dance Cover [bYFDRJz5nGk].mp4",
+      "audioUrl": "/audio/allday-project-wicked-mirrored-dance-cover-byfdrjz5ngk.mp3",
+      "sampledFps": 30,
+      "detectedFrames": 1011,
+      "sampledFrames": 1012,
+      "detectionRate": 0.999
     }
   ]
 }

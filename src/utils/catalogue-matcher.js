@@ -131,7 +131,12 @@ const DEFAULT_OPTIONS = {
   // Local time-warping room (seconds) around the audio-clock anchor for the
   // single-dance/audio-synced path: how far off-beat a player can be while
   // still matched to the right reference frame.
-  syncBandSeconds: 1.0,
+  syncBandSeconds: 1.25,
+  // After alignment, each live sample is scored against the BEST reference
+  // frame within this many seconds of its aligned position, not just the
+  // exact aligned frame. This is the per-pose "human timing slop": hitting
+  // a move slightly early or late costs nothing.
+  scorePoolSeconds: 0.25,
   // Same, for the multi-dance fallback search (kept tighter - this path also
   // scans start offsets, and a wide band there drifts onto wrong dances).
   fallbackBandSeconds: 0.35,
@@ -161,14 +166,16 @@ const DEFAULT_OPTIONS = {
   // is (relative to activityFloorDegPerSec), so held poses aren't penalized
   // for having no motion to compare.
   velocityDeltaSeconds: 0.3,
-  // Loose-ish on purpose: live webcam keypoints jitter, and differentiating
-  // jittery positions inflates velocity error even for a perfect dancer.
-  // The anti-idle work is mostly done by the sequence-level motion-ratio
-  // penalty and the informativeness weighting, not by this per-frame term.
-  velocitySigmaDegPerSec: 110,
+  // Loose on purpose: live webcam keypoints jitter, and differentiating
+  // jittery positions inflates velocity error even for a perfect dancer -
+  // and human timing offsets already show up in the static term, so a tight
+  // velocity match would punish the same mistake twice. The anti-idle work
+  // is done by the sequence-level motion-ratio penalty and the
+  // informativeness weighting, not by this per-frame term.
+  velocitySigmaDegPerSec: 140,
   activityFloorDegPerSec: 45,
   // Share of the per-frame score taken by the motion term when available.
-  dynamicsWeight: 0.4,
+  dynamicsWeight: 0.25,
   // Reference-bone informativeness (see attachInformativeness): a bone at
   // rest and not moving only counts restingBoneWeight; full weight is
   // reached at informativeDeviationDeg away from rest (or when moving).
@@ -181,7 +188,10 @@ const DEFAULT_OPTIONS = {
   // matter how well it matches one frame). No penalty when the reference
   // itself is nearly still (below motionPenaltyMinRefDegPerSec) - holding a
   // pose the choreography holds is correct.
-  motionRatioFloor: 0.6,
+  // 0.45: casual players dance "smaller" than the pro in the reference
+  // video; moving with the routine at ~half amplitude should not be
+  // punished - only genuinely standing still should.
+  motionRatioFloor: 0.45,
   motionPenaltyMinRefDegPerSec: 12,
   // Live pose estimates jitter, and differentiating jitter looks like ~10
   // deg/s of motion even on a player standing perfectly still. Deducted
@@ -194,8 +204,11 @@ const DEFAULT_OPTIONS = {
   // scoreCeil to 100%. Calibrated with `npm run evaluate:matcher` so that
   // cross-dance (wrong dance) raw scores land near 0-25% displayed and
   // heavily-perturbed correct dancing lands above ~60%.
-  scoreFloor: 62,
-  scoreCeil: 94,
+  scoreFloor: 78,
+  scoreCeil: 96,
+  // Concave display curve exponent (see toDisplayScore); < 1 lifts the
+  // mid-range so decent-but-human dancing reads as a motivating score.
+  displayGamma: 0.7,
 };
 
 function mergeConfig(options) {
@@ -772,11 +785,27 @@ function runAlignment(samples, dance, config, anchorTimeForRow, bandFrames) {
 
   if (!alignment.path.length) return emptySequenceResult(dance);
 
-  // Collapse the path to one comparison per live sample (keep the last
-  // column the alignment settled on for rows visited more than once).
+  // Collapse the path to one comparison per live sample, max-pooling over a
+  // small temporal neighborhood of the aligned frame (all those cells were
+  // already computed by the banded DTW): a pose hit slightly early or late
+  // gets full credit. Human timing slop, not robot frame-matching.
+  const sampledFps = dance.sampledFps || 30;
+  const poolRadius = Math.max(0, Math.round(config.scorePoolSeconds * sampledFps));
   const rowResult = new Map();
   for (const [i, j] of alignment.path) {
-    rowResult.set(i, cellCache.get(i * frames.length + j));
+    let best = rowResult.get(i) ?? null;
+    for (let dj = -poolRadius; dj <= poolRadius; dj++) {
+      const cell = cellCache.get(i * frames.length + (j + dj));
+      if (!cell) continue;
+      if (
+        !best ||
+        (cell.informative && !best.informative) ||
+        (cell.informative === best.informative && cell.score > best.score)
+      ) {
+        best = cell;
+      }
+    }
+    rowResult.set(i, best);
   }
 
   let scoreSum = 0;
@@ -851,10 +880,12 @@ function runAlignment(samples, dance, config, anchorTimeForRow, bandFrames) {
 
 // Raw bone similarity has a high floor (any two humans standing under
 // gravity share most of a pose), so stretch [scoreFloor, scoreCeil] onto
-// the 0-100% the player sees.
+// the 0-100% the player sees. The concave exponent makes mid-range
+// performances read rewarding (t=0.5 -> ~62%) instead of linearly stingy -
+// this is a game, not a metrology lab.
 function toDisplayScore(raw, config) {
-  const t = (raw - config.scoreFloor) / (config.scoreCeil - config.scoreFloor);
-  return round(100 * clamp(t, 0, 1), 1);
+  const t = clamp((raw - config.scoreFloor) / (config.scoreCeil - config.scoreFloor), 0, 1);
+  return round(100 * Math.pow(t, config.displayGamma), 1);
 }
 
 // Binary search for the reference frame whose timestamp is closest.
@@ -891,20 +922,23 @@ export function normalizePoseKeypoints(keypoints, threshold) {
   if (!visible(leftHip, threshold) || !visible(rightHip, threshold)) return null;
   const origin = midpoint(leftHip, rightHip);
 
-  let scale = null;
+  // Scale: shoulder width alone collapses whenever the dancer turns
+  // sideways (the projected width goes toward zero, so dividing by it
+  // explodes every coordinate - the "teleporting joints / giant bbox"
+  // artifact in overlays). Torso length barely changes with body rotation,
+  // so take the max of the two, converting torso to shoulder-width units
+  // (torso =~ 1.11 shoulder widths on a standard body).
+  let scale = 0;
   if (visible(leftShoulder, threshold) && visible(rightShoulder, threshold)) {
-    const d = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
-    if (d > 1e-6) scale = d;
+    scale = Math.hypot(leftShoulder.x - rightShoulder.x, leftShoulder.y - rightShoulder.y);
   }
-  if (!scale) {
-    const shoulders = [leftShoulder, rightShoulder].filter((point) => visible(point, threshold));
-    if (shoulders.length > 0) {
-      const shoulderMid = shoulders.length === 2 ? midpoint(leftShoulder, rightShoulder) : shoulders[0];
-      const torso = Math.hypot(origin.x - shoulderMid.x, origin.y - shoulderMid.y);
-      if (torso > 1e-6) scale = torso;
-    }
+  const shoulders = [leftShoulder, rightShoulder].filter((point) => visible(point, threshold));
+  if (shoulders.length > 0) {
+    const shoulderMid = shoulders.length === 2 ? midpoint(leftShoulder, rightShoulder) : shoulders[0];
+    const torso = Math.hypot(origin.x - shoulderMid.x, origin.y - shoulderMid.y);
+    scale = Math.max(scale, torso / BONE_LENGTH.torso);
   }
-  if (!scale) return null;
+  if (scale < 1e-6) return null;
 
   return keypoints.map((point, index) => ({
     name: point.name ?? KEYPOINT_NAMES[index],

@@ -278,6 +278,17 @@ function App() {
   const playedDanceIdsRef = useRef([]);
   const sessionPrecisionsRef = useRef([]);
 
+  const [preciseAnalysisProgress, setPreciseAnalysisProgress] = useState(0);
+  const [preciseAnalysisStatus, setPreciseAnalysisStatus] = useState("");
+
+  const recordedFramesRef = useRef([]);
+  const lastRecordedTimeRef = useRef(0);
+  const inferenceResolverRef = useRef(null);
+  const modelLoadedResolverRef = useRef(null);
+  const shouldAnalyzeRef = useRef(false);
+  const currentDanceTitleRef = useRef("");
+  const postInferenceMessageRef = useRef(null);
+
   useEffect(() => {
     danceScoreRef.current = danceScore;
   }, [danceScore]);
@@ -362,6 +373,10 @@ function App() {
     setSequenceSampleCount(0);
   }, []);
 
+  const stopMediaLoop = useCallback(() => {
+    mediaLoopTokenRef.current += 1;
+  }, []);
+
   const prepareCountdown = useCallback(() => {
     resetLiveComparison();
     sequenceStartRef.current = 0;
@@ -377,7 +392,13 @@ function App() {
     ]);
   }, [resetLiveComparison]);
 
+  const abortRecording = useCallback(() => {
+    shouldAnalyzeRef.current = false;
+    recordedFramesRef.current = [];
+  }, []);
+
   const stopMusic = useCallback(() => {
+    abortRecording();
     if (audioTimeoutRef.current) {
       window.clearInterval(audioTimeoutRef.current);
       window.clearTimeout(audioTimeoutRef.current);
@@ -392,7 +413,203 @@ function App() {
     setPauseCountdown(0);
     setAudioTimeLeft(null);
     playedDanceIdsRef.current = [];
+  }, [abortRecording]);
+
+  const loadModelPromise = useCallback((modelName) => {
+    return new Promise((resolve) => {
+      modelLoadedResolverRef.current = resolve;
+      const config = {
+        ...DEFAULT_MODEL_CONFIG,
+        model: modelName,
+        modelPath: `${import.meta.env.BASE_URL}models/${modelName}-pose.onnx`
+      };
+      postInferenceMessageRef.current?.({
+        type: "LOAD_MODEL",
+        config
+      });
+    });
   }, []);
+
+  const processFramePromise = useCallback((bitmap, config) => {
+    return new Promise((resolve) => {
+      inferenceResolverRef.current = resolve;
+      postInferenceMessageRef.current?.(
+        {
+          type: "INFERENCE",
+          config,
+          bitmap,
+        },
+        [bitmap]
+      );
+    });
+  }, []);
+
+  const startPauseCountdown = useCallback((finalScore, finalSampleCount, danceTitle) => {
+    let rank = "C";
+    if (finalScore > 60) rank = "A";
+    else if (finalScore >= 45) rank = "B";
+
+    const historyEntry = {
+      id: Date.now(),
+      title: danceTitle,
+      score: `${finalScore}%`,
+      rank: rank,
+      samples: finalSampleCount,
+      date: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    };
+
+    setScoreHistory((prev) => [historyEntry, ...prev]);
+
+    setLastDanceInfo({
+      title: danceTitle,
+      score: `${finalScore}%`,
+      rank: rank,
+    });
+    setGameState("pause");
+    setPauseCountdown(5);
+    setAudioTimeLeft(null);
+
+    let remaining = 5;
+    const intervalId = window.setInterval(() => {
+      remaining -= 1;
+      setPauseCountdown(remaining);
+      if (remaining <= 0) {
+        window.clearInterval(intervalId);
+        setLastDanceInfo(null);
+        
+        const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
+        const unplayedDances = dancesWithAudio.filter((d) => !playedDanceIdsRef.current.includes(d.id));
+        if (unplayedDances.length > 0) {
+          const nextDance = unplayedDances[Math.floor(Math.random() * unplayedDances.length)];
+          setSelectedDanceId(nextDance.id);
+          prepareCountdown();
+        } else {
+          stopMusic();
+          setGameState("idle");
+          setPerformanceRating({ text: "TERMINE", color: "text-emerald-400 font-extrabold" });
+          setCoachComments(["Felicitations ! Vous avez complete toutes les danses de la playlist !"]);
+        }
+      }
+    }, 1000);
+
+    audioTimeoutRef.current = intervalId;
+  }, [catalogue, prepareCountdown, stopMusic]);
+
+  const runPreciseAnalysis = useCallback(async () => {
+    setGameState("analyzing");
+    setPreciseAnalysisProgress(0);
+    setPreciseAnalysisStatus("Chargement du modèle de haute précision...");
+
+    try {
+      // 1. Load yolo26s-pose.onnx
+      await loadModelPromise("yolo26s");
+
+      setPreciseAnalysisStatus("Analyse de la chorégraphie...");
+
+      const frames = recordedFramesRef.current;
+      const totalSteps = frames.length;
+      let currentStep = 0;
+
+      const precisePrecisions = [];
+      const liveSequence = [];
+
+      // Find the current selected dance
+      const selectedDance = selectedDanceId
+        ? catalogue?.dances?.find((d) => d.id === selectedDanceId)
+        : null;
+
+      for (let i = 0; i < frames.length; i++) {
+        const frame = frames[i];
+        
+        // Convert Blob to ImageBitmap
+        const bitmap = await createImageBitmap(frame.blob);
+
+        const data = await processFramePromise(bitmap, {
+          ...DEFAULT_MODEL_CONFIG,
+          model: "yolo26s",
+          overlaySize: [640, 640],
+        });
+
+        const targetPose = getHighestScorePose(data.results);
+        if (targetPose?.keypoints) {
+          const sample = createPoseSample(targetPose, frame.timestamp, {
+            mirror: true,
+          });
+          if (sample) {
+            liveSequence.push(sample);
+          }
+        }
+
+        const currentLiveSeq = liveSequence.filter(
+          (entry) => frame.timestamp - entry.timestamp <= SEQUENCE_WINDOW_SECONDS
+        );
+
+        if (catalogue) {
+          const activeCatalogue = selectedDance
+            ? { ...catalogue, dances: [selectedDance] }
+            : catalogue;
+
+          const matchOptions = {
+            sequenceWindowSeconds: SEQUENCE_WINDOW_SECONDS,
+            syncToTimeline: true,
+            speedFactors: [1],
+            maxTimeGapSeconds: 0.22,
+          };
+
+          const instantMatch = matchPoseSequenceToCatalogue(
+            currentLiveSeq,
+            activeCatalogue,
+            matchOptions,
+          );
+
+          const rawPrecision = instantMatch.best ? Math.round(instantMatch.best.score) : 0;
+          const precision = rawPrecision <= 20
+            ? rawPrecision
+            : Math.min(100, Math.round(20 + ((rawPrecision - 20) * 80) / 65));
+
+          precisePrecisions.push(precision);
+        }
+
+        currentStep++;
+        setPreciseAnalysisProgress(Math.min(99, Math.round((currentStep / totalSteps) * 100)));
+        
+        // Yield thread execution for rendering UI smoothly
+        if (i % 2 === 0) {
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+
+      setPreciseAnalysisStatus("Calcul du score final...");
+      setPreciseAnalysisProgress(100);
+
+      const finalScore = precisePrecisions.length > 0
+        ? Math.round(precisePrecisions.reduce((a, b) => a + b, 0) / precisePrecisions.length)
+        : 0;
+
+      await new Promise((r) => setTimeout(r, 1000));
+
+      // 4. Load back standard yolo26n model
+      setPreciseAnalysisStatus("Rechargement du modèle de jeu...");
+      await loadModelPromise("yolo26n");
+
+      // Clear recorded frames
+      recordedFramesRef.current = [];
+
+      // 5. Start transition countdown with the precise score
+      startPauseCountdown(finalScore, liveSequence.length, currentDanceTitleRef.current);
+
+    } catch (err) {
+      console.error("Precise analysis failed:", err);
+      setPreciseAnalysisStatus("Erreur d'analyse. Rechargement du modèle standard...");
+      try {
+        await loadModelPromise("yolo26n");
+      } catch (e) {
+        console.error("Failed to reload model:", e);
+      }
+      recordedFramesRef.current = [];
+      startPauseCountdown(danceScoreRef.current, liveSequenceRef.current.length, currentDanceTitleRef.current);
+    }
+  }, [catalogue, selectedDanceId, startPauseCountdown, loadModelPromise, processFramePromise]);
 
   const playMusicForCamera = useCallback(() => {
     stopMusic();
@@ -436,57 +653,14 @@ function App() {
       }, { once: true });
 
       audio.addEventListener("ended", () => {
-        const finalScore = danceScoreRef.current;
-        const finalSampleCount = liveSequenceRef.current.length;
+        stopMediaLoop();
         
-        let rank = "C";
-        if (finalScore > 60) rank = "A";
-        else if (finalScore >= 45) rank = "B";
-
-        const historyEntry = {
-          id: Date.now(),
-          title: selectedDance.title,
-          score: `${finalScore}%`,
-          rank: rank,
-          samples: finalSampleCount,
-          date: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        };
-
-        setScoreHistory((prev) => [historyEntry, ...prev]);
-
-        setLastDanceInfo({
-          title: selectedDance.title,
-          score: `${finalScore}%`,
-          rank: rank,
-        });
-        setGameState("pause");
-        setPauseCountdown(5);
-        setAudioTimeLeft(null);
-
-        let remaining = 5;
-        const intervalId = window.setInterval(() => {
-          remaining -= 1;
-          setPauseCountdown(remaining);
-          if (remaining <= 0) {
-            window.clearInterval(intervalId);
-            setLastDanceInfo(null);
-            
-            const dancesWithAudio = catalogue.dances.filter((d) => d.audioUrl);
-            const unplayedDances = dancesWithAudio.filter((d) => !playedDanceIdsRef.current.includes(d.id));
-            if (unplayedDances.length > 0) {
-              const nextDance = unplayedDances[Math.floor(Math.random() * unplayedDances.length)];
-              setSelectedDanceId(nextDance.id);
-              prepareCountdown();
-            } else {
-              stopMusic();
-              setGameState("idle");
-              setPerformanceRating({ text: "TERMINE", color: "text-emerald-400 font-extrabold" });
-              setCoachComments(["Felicitations ! Vous avez complete toutes les danses de la playlist !"]);
-            }
-          }
-        }, 1000);
-
-        audioTimeoutRef.current = intervalId;
+        if (activeFeatureRef.current === "camera" && recordedFramesRef.current.length > 0) {
+          currentDanceTitleRef.current = selectedDance.title;
+          runPreciseAnalysis();
+        } else {
+          startPauseCountdown(danceScoreRef.current, liveSequenceRef.current.length, selectedDance.title);
+        }
       });
  
       currentAudioRef.current = audio;
@@ -494,7 +668,7 @@ function App() {
         console.warn("Autoplay block or music play failed:", err);
       });
     }
-  }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId, prepareCountdown, resetLiveComparison]);
+  }, [catalogue, selectedDanceId, stopMusic, setSelectedDanceId, prepareCountdown, resetLiveComparison, startPauseCountdown, stopMediaLoop, runPreciseAnalysis]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -510,6 +684,14 @@ function App() {
       stopMusic();
     };
   }, [activeFeature, selectedDanceId, playMusicForCamera, stopMusic]);
+
+  useEffect(() => {
+    if (gameState === "detecting" && activeFeature === "camera") {
+      recordedFramesRef.current = [];
+      shouldAnalyzeRef.current = true;
+      lastRecordedTimeRef.current = 0;
+    }
+  }, [gameState, activeFeature]);
 
   useEffect(() => {
     if (gameState !== "countdown") return undefined;
@@ -545,6 +727,13 @@ function App() {
 
   const handleInferenceResult = useCallback(
     (data) => {
+      if (inferenceResolverRef.current) {
+        const resolve = inferenceResolverRef.current;
+        inferenceResolverRef.current = null;
+        resolve(data);
+        return;
+      }
+
       const overlayCtx = overlayRef.current?.getContext("2d");
       if (!overlayCtx) {
         isProcessingRef.current = false;
@@ -747,6 +936,12 @@ function App() {
       statusColor: "green",
       warnUpTime: data.loadTime,
     }));
+    if (modelLoadedResolverRef.current) {
+      const resolve = modelLoadedResolverRef.current;
+      modelLoadedResolverRef.current = null;
+      resolve();
+      return;
+    }
     setActiveFeature(null);
   }, []);
 
@@ -756,6 +951,12 @@ function App() {
       statusMsg: data.msg,
       statusColor: "red",
     }));
+    if (modelLoadedResolverRef.current) {
+      const resolve = modelLoadedResolverRef.current;
+      modelLoadedResolverRef.current = null;
+      resolve();
+      return;
+    }
     setActiveFeature(null);
   }, []);
 
@@ -764,6 +965,10 @@ function App() {
     onResult: handleInferenceResult,
     onError: handleModelLoadError,
   });
+
+  useEffect(() => {
+    postInferenceMessageRef.current = postInferenceMessage;
+  }, [postInferenceMessage]);
 
   const { cameras, getCameras, openCamera, closeCamera, cameraStatus } =
     useWebcam(cameraRef);
@@ -840,6 +1045,21 @@ function App() {
         mirrorCtx.drawImage(mediaElement, 0, 0, inferW, inferH);
         mirrorCtx.restore();
 
+        // Capture frame to JPEG blob in memory for post-analysis
+        const nowMs = performance.now();
+        if (shouldAnalyzeRef.current && nowMs - lastRecordedTimeRef.current >= 66) { // ~15 FPS
+          lastRecordedTimeRef.current = nowMs;
+          const timestamp = getSyncTimeSeconds();
+          mirrorCanvas.toBlob((blob) => {
+            if (shouldAnalyzeRef.current && blob) {
+              recordedFramesRef.current.push({
+                timestamp,
+                blob
+              });
+            }
+          }, "image/jpeg", 0.65);
+        }
+
         bitmap = await createImageBitmap(mirrorCanvas);
       } else {
         bitmap = await createImageBitmap(mediaElement, {
@@ -868,11 +1088,7 @@ function App() {
       console.error("Frame capture error:", error);
       isProcessingRef.current = false;
     }
-  }, [postInferenceMessage]);
-
-  const stopMediaLoop = useCallback(() => {
-    mediaLoopTokenRef.current += 1;
-  }, []);
+  }, [postInferenceMessage, getSyncTimeSeconds]);
 
   const startMediaLoop = useCallback((featureName, mediaRef) => {
     mediaLoopTokenRef.current += 1;
@@ -1076,6 +1292,25 @@ function App() {
             <div className="absolute inset-0 bg-black/70 flex items-center justify-center flex-col gap-3 rounded-2xl">
               <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
               <span className="text-violet-300 font-bold">Chargement du modele...</span>
+            </div>
+          )}
+
+          {gameState === "analyzing" && (
+            <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center flex-col gap-6 rounded-2xl p-6 text-center animate-fade-in border border-violet-500/30 shadow-[0_0_50px_rgba(139,92,246,0.3)] z-50">
+              <div className="w-16 h-16 border-4 border-t-fuchsia-500 border-r-fuchsia-500 border-b-violet-500 border-l-violet-500 rounded-full animate-spin"></div>
+              <div>
+                <h2 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-500 uppercase tracking-widest text-violet-neon">
+                  Analyse Haute Précision
+                </h2>
+                <p className="text-slate-300 text-sm mt-2 font-semibold">{preciseAnalysisStatus}</p>
+              </div>
+              <div className="w-full max-w-xs bg-[#050818]/80 rounded-full h-3 overflow-hidden border border-violet-500/20 shadow-inner">
+                <div 
+                  className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-full rounded-full transition-all duration-300"
+                  style={{ width: `${preciseAnalysisProgress}%` }}
+                ></div>
+              </div>
+              <span className="text-xs text-violet-300 font-bold uppercase tracking-widest">{preciseAnalysisProgress}%</span>
             </div>
           )}
 

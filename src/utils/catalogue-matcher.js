@@ -372,6 +372,8 @@ function compareSequenceAtStart(samples, dance, start, firstLiveTimestamp, speed
 }
 
 function findNearestFrame(frames, timestamp) {
+  if (!frames.length) return null;
+
   let low = 0;
   let high = frames.length - 1;
 
@@ -384,13 +386,50 @@ function findNearestFrame(frames, timestamp) {
     }
   }
 
-  const previous = frames[high];
-  const next = frames[low];
-  if (!previous) return next ?? null;
-  if (!next) return previous;
-  return Math.abs(previous.timestamp - timestamp) <= Math.abs(next.timestamp - timestamp)
-    ? previous
-    : next;
+  const prev = frames[high] ?? null;
+  const next = frames[low] ?? null;
+
+  if (!prev) return next;
+  if (!next) return prev;
+
+  const tA = prev.timestamp;
+  const tB = next.timestamp;
+  if (tA === tB) return prev;
+
+  const f = Math.max(0, Math.min(1, (timestamp - tA) / (tB - tA)));
+
+  // Interpolate keypoints
+  const keypoints = [];
+  const len = Math.min(prev.keypoints.length, next.keypoints.length);
+  for (let i = 0; i < len; i++) {
+    const kpA = prev.keypoints[i];
+    const kpB = next.keypoints[i];
+    keypoints.push({
+      name: kpA.name,
+      x: kpA.x + f * (kpB.x - kpA.x),
+      y: kpA.y + f * (kpB.y - kpA.y),
+      score: kpA.score + f * (kpB.score - kpA.score),
+    });
+  }
+
+  // Interpolate angles
+  const angles = {};
+  for (const key of Object.keys(prev.angles)) {
+    const valA = prev.angles[key];
+    const valB = next.angles[key];
+    if (valA !== null && valA !== undefined && valB !== null && valB !== undefined) {
+      angles[key] = valA + f * (valB - valA);
+    } else {
+      angles[key] = valA ?? valB ?? null;
+    }
+  }
+
+  return {
+    frameIndex: prev.frameIndex,
+    timestamp,
+    keypoints,
+    angles,
+  };
 }
 
 function compareFrame(live, frame, config) {

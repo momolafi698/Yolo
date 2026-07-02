@@ -1471,6 +1471,10 @@ function App() {
                     <p className="text-xs text-slate-500">
                       aligne a {candidate.alignedTimestamp ?? "-"}s - {candidate.matchedSamples ?? 0} poses
                     </p>
+                    <p className="text-xs text-slate-600 font-mono">
+                      raw {candidate.rawScore ?? "-"} · mouvement x{candidate.motionRatio ?? "-"}
+                      {candidate.mirrored ? " · miroir" : ""}
+                    </p>
                   </div>
                 ))
               )}

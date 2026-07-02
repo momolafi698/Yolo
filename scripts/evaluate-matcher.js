@@ -48,6 +48,12 @@ const SCENARIOS = {
   "true/high": { lag: 0.35, tempoAmp: 0.22, posSigma: 0.1, dropProb: 0.12, rotDeg: 9 },
   "true/medium+mirror": { lag: 0.2, tempoAmp: 0.12, posSigma: 0.06, dropProb: 0.06, rotDeg: 5, mirror: true },
   "true/medium+body": { lag: 0.2, tempoAmp: 0.12, posSigma: 0.06, dropProb: 0.06, rotDeg: 5, bodySigma: 0.25 },
+  // Anti-cheese scenarios: a player who isn't dancing at all. "freeze" holds
+  // one pose taken from the middle of the window (the hardest case - it's a
+  // genuine pose from this very choreography); "stand" is a neutral person
+  // standing with arms down. Both should score LOW against a dance.
+  "idle/freeze": { mode: "freeze", posSigma: 0.03 },
+  "idle/stand": { mode: "stand", posSigma: 0.03 },
 };
 
 const FALSE_SCENARIO = SCENARIOS["true/low"];
@@ -183,6 +189,37 @@ function centroid(keypoints) {
   return n > 0 ? { x: x / n, y: y / n } : { x: 0, y: 0 };
 }
 
+// A neutral standing pose (hip-centered, shoulder-width units): arms
+// hanging, legs straight, built from the canonical segment lengths.
+function standingKeypoints() {
+  const shoulderY = -BONE_LENGTH.torso;
+  const named = {
+    nose: { x: 0, y: shoulderY - 0.5 },
+    leftEye: { x: 0.08, y: shoulderY - 0.55 },
+    rightEye: { x: -0.08, y: shoulderY - 0.55 },
+    leftEar: { x: 0.16, y: shoulderY - 0.5 },
+    rightEar: { x: -0.16, y: shoulderY - 0.5 },
+    leftShoulder: { x: BONE_LENGTH.shoulderHalf, y: shoulderY },
+    rightShoulder: { x: -BONE_LENGTH.shoulderHalf, y: shoulderY },
+    leftElbow: { x: BONE_LENGTH.shoulderHalf, y: shoulderY + BONE_LENGTH.upperArm },
+    rightElbow: { x: -BONE_LENGTH.shoulderHalf, y: shoulderY + BONE_LENGTH.upperArm },
+    leftWrist: { x: BONE_LENGTH.shoulderHalf, y: shoulderY + BONE_LENGTH.upperArm + BONE_LENGTH.forearm },
+    rightWrist: { x: -BONE_LENGTH.shoulderHalf, y: shoulderY + BONE_LENGTH.upperArm + BONE_LENGTH.forearm },
+    leftHip: { x: BONE_LENGTH.hipHalf, y: 0 },
+    rightHip: { x: -BONE_LENGTH.hipHalf, y: 0 },
+    leftKnee: { x: BONE_LENGTH.hipHalf, y: BONE_LENGTH.thigh },
+    rightKnee: { x: -BONE_LENGTH.hipHalf, y: BONE_LENGTH.thigh },
+    leftAnkle: { x: BONE_LENGTH.hipHalf, y: BONE_LENGTH.thigh + BONE_LENGTH.shin },
+    rightAnkle: { x: -BONE_LENGTH.hipHalf, y: BONE_LENGTH.thigh + BONE_LENGTH.shin },
+  };
+  return [
+    "nose", "leftEye", "rightEye", "leftEar", "rightEar",
+    "leftShoulder", "rightShoulder", "leftElbow", "rightElbow",
+    "leftWrist", "rightWrist", "leftHip", "rightHip",
+    "leftKnee", "rightKnee", "leftAnkle", "rightAnkle",
+  ].map((name) => ({ name, ...named[name], score: 0.9 }));
+}
+
 // Synthesizes one live window from a slice of a dance's raw frames.
 // Per-window draws (fixed for the whole window, like a real player/camera):
 // body proportions, camera tilt sign. Per-frame draws: positional noise,
@@ -190,6 +227,14 @@ function centroid(keypoints) {
 function buildLiveWindow(rawFrames, startIndex, frameCount, scenario, rng) {
   const slice = rawFrames.slice(startIndex, startIndex + frameCount);
   if (slice.length < frameCount) return null;
+
+  // Idle modes: keep the slice's real timestamps but replace every pose
+  // with one fixed pose (the player is not dancing).
+  const frozenKeypoints = scenario.mode === "freeze"
+    ? slice[Math.floor(slice.length / 2)].person.keypoints
+    : scenario.mode === "stand"
+      ? standingKeypoints()
+      : null;
 
   const bodyLengths = scenario.bodySigma
     ? randomBodyBoneLengths(rng, scenario.bodySigma)
@@ -201,7 +246,7 @@ function buildLiveWindow(rawFrames, startIndex, frameCount, scenario, rng) {
 
   const samples = [];
   for (const frame of slice) {
-    let keypoints = frame.person.keypoints.map((point) => ({ ...point }));
+    let keypoints = (frozenKeypoints ?? frame.person.keypoints).map((point) => ({ ...point }));
 
     if (bodyLengths) {
       const normalized = normalizePoseKeypoints(keypoints, KEYPOINT_THRESHOLD);

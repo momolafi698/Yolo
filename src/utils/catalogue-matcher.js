@@ -60,6 +60,49 @@ const MIRROR_BONE = {
   rightShin: "leftShin",
 };
 
+// "Rest" direction of each bone in image coordinates (y grows downward):
+// limbs hang/point down on an idle human, the torso points up. A reference
+// bone near its rest direction and not moving says almost nothing about the
+// choreography - any person standing in frame matches it - so it gets less
+// say in the score (see boneInformativeness).
+const REST_DIRECTION = {
+  torso: { x: 0, y: -1 },
+  leftUpperArm: { x: 0, y: 1 },
+  rightUpperArm: { x: 0, y: 1 },
+  leftForearm: { x: 0, y: 1 },
+  rightForearm: { x: 0, y: 1 },
+  leftThigh: { x: 0, y: 1 },
+  rightThigh: { x: 0, y: 1 },
+  leftShin: { x: 0, y: 1 },
+  rightShin: { x: 0, y: 1 },
+};
+
+// How much a reference bone should count, in [restingBoneWeight, 1]: full
+// weight when it deviates from its rest direction (a held gesture) or is
+// moving (a beat), low weight when it just hangs there. Attached to
+// reference frames once at load; live samples never need it.
+function attachInformativeness(frames, config) {
+  for (const frame of frames) {
+    for (const name of BONE_NAMES) {
+      const bone = frame.bones[name];
+      if (!bone) continue;
+
+      const rest = REST_DIRECTION[name];
+      const dot = clamp(bone.x * rest.x + bone.y * rest.y, -1, 1);
+      const deviationDeg = Math.acos(dot) * (180 / Math.PI);
+      const deviationTerm = Math.min(1, deviationDeg / config.informativeDeviationDeg);
+
+      const vel = frame.vel?.[name];
+      const motionTerm = vel === null || vel === undefined
+        ? 0
+        : Math.min(1, Math.abs(vel) / config.activityFloorDegPerSec);
+
+      bone.info = config.restingBoneWeight +
+        (1 - config.restingBoneWeight) * Math.max(deviationTerm, motionTerm);
+    }
+  }
+}
+
 const DEFAULT_OPTIONS = {
   // Minimum keypoint confidence (0-1, from the pose model) for a joint to
   // participate in a bone. Below this the bone that needs it is skipped -
@@ -94,12 +137,15 @@ const DEFAULT_OPTIONS = {
   fallbackAnchorStepSeconds: 0.3,
   // How far (seconds) fallback searches for a start offset.
   fallbackTimeTolerance: 5.0,
-  // Extra DTW cost per non-diagonal step, discouraging degenerate warps.
-  stepPenalty: 0.02,
+  // Extra DTW cost per non-diagonal step. Deliberately not tiny: a player
+  // holding one pose could otherwise "freeze" the alignment on whichever
+  // single reference frame matches that pose best and coast on it for the
+  // whole window.
+  stepPenalty: 0.06,
   // Tolerance (degrees) on each bone's direction error. This is the main
   // "how forgiving is a pose" knob. 30 deg means a bone held ~30 deg off
   // still earns ~61% of its points; ~60 deg off earns ~14%.
-  staticSigmaDeg: 26,
+  staticSigmaDeg: 30,
   // Motion term: bones' angular velocities (deg/s) are compared so that
   // moving with the choreography scores and freezing during a move doesn't.
   // Velocity is measured over velocityDeltaSeconds; the comparison tolerance
@@ -107,10 +153,27 @@ const DEFAULT_OPTIONS = {
   // is (relative to activityFloorDegPerSec), so held poses aren't penalized
   // for having no motion to compare.
   velocityDeltaSeconds: 0.3,
-  velocitySigmaDegPerSec: 150,
-  activityFloorDegPerSec: 60,
+  velocitySigmaDegPerSec: 80,
+  activityFloorDegPerSec: 45,
   // Share of the per-frame score taken by the motion term when available.
-  dynamicsWeight: 0.35,
+  // Kept high on purpose: static bone directions share a lot between ANY
+  // two humans (gravity), so rhythm/motion is where standing still and
+  // dancing actually separate.
+  dynamicsWeight: 0.45,
+  // Reference-bone informativeness (see attachInformativeness): a bone at
+  // rest and not moving only counts restingBoneWeight; full weight is
+  // reached at informativeDeviationDeg away from rest (or when moving).
+  restingBoneWeight: 0.25,
+  informativeDeviationDeg: 60,
+  // Sequence-level anti-idle penalty: over the aligned window, the player's
+  // total limb motion is compared to the reference's. Full credit from
+  // motionRatioFloor of the reference's motion upward; below that the
+  // displayed score scales down linearly (a frozen pose ends up near 0 no
+  // matter how well it matches one frame). No penalty when the reference
+  // itself is nearly still (below motionPenaltyMinRefDegPerSec) - holding a
+  // pose the choreography holds is correct.
+  motionRatioFloor: 0.6,
+  motionPenaltyMinRefDegPerSec: 12,
   // Raw similarity -> displayed percentage mapping. Raw similarity has a
   // high floor (two random dance poses share gravity, a standing torso,
   // legs pointing down...), so it's stretched: scoreFloor maps to 0% and
@@ -165,6 +228,7 @@ export function prepareDance(entry) {
     .filter(Boolean);
 
   attachVelocities(frames, config);
+  attachInformativeness(frames, config);
 
   return {
     id: entry.id,
@@ -419,6 +483,9 @@ function compareFrame(live, reference, config) {
   let dynSum = 0;
   let dynWeight = 0;
   let count = 0;
+  let liveMotion = 0;
+  let refMotion = 0;
+  let motionWeight = 0;
 
   for (const bone of BONES) {
     const a = live.bones[bone.name];
@@ -428,7 +495,7 @@ function compareFrame(live, reference, config) {
     count += 1;
     const dot = clamp(a.x * b.x + a.y * b.y, -1, 1);
     const theta = Math.acos(dot) * (180 / Math.PI);
-    const weight = bone.weight * Math.min(a.w, b.w);
+    const weight = bone.weight * Math.min(a.w, b.w) * (b.info ?? 1);
     staticSum += weight * Math.exp(-(theta * theta) / (2 * sigma * sigma));
     staticWeight += weight;
 
@@ -447,11 +514,23 @@ function compareFrame(live, reference, config) {
       const velWeight = weight * activity;
       dynSum += velWeight * Math.exp(-(diff * diff) / (2 * velSigma * velSigma));
       dynWeight += velWeight;
+
+      liveMotion += bone.weight * Math.abs(liveVel);
+      refMotion += bone.weight * Math.abs(refVel);
+      motionWeight += bone.weight;
     }
   }
 
   if (count === 0 || staticWeight === 0) {
-    return { score: 0, staticScore: 0, dynamicScore: null, comparableBones: 0, informative: false };
+    return {
+      score: 0,
+      staticScore: 0,
+      dynamicScore: null,
+      comparableBones: 0,
+      informative: false,
+      liveMotion: null,
+      refMotion: null,
+    };
   }
 
   const staticScore = (100 * staticSum) / staticWeight;
@@ -468,6 +547,8 @@ function compareFrame(live, reference, config) {
     dynamicScore: dynamicScore === null ? null : round(dynamicScore, 1),
     comparableBones: count,
     informative,
+    liveMotion: motionWeight > 0 ? liveMotion / motionWeight : null,
+    refMotion: motionWeight > 0 ? refMotion / motionWeight : null,
   };
 }
 
@@ -514,6 +595,7 @@ function emptySequenceResult(dance) {
     title: dance.title,
     score: 0,
     rawScore: 0,
+    motionRatio: null,
     staticScore: 0,
     dynamicScore: null,
     mirrored: false,
@@ -611,6 +693,9 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
   let dynSum = 0;
   let dynCount = 0;
   let informativeRows = 0;
+  let liveMotionSum = 0;
+  let refMotionSum = 0;
+  let motionRows = 0;
 
   for (const comparison of rowResult.values()) {
     if (!comparison?.informative) continue;
@@ -620,6 +705,11 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
     if (comparison.dynamicScore !== null) {
       dynSum += comparison.dynamicScore;
       dynCount += 1;
+    }
+    if (comparison.liveMotion !== null) {
+      liveMotionSum += comparison.liveMotion;
+      refMotionSum += comparison.refMotion;
+      motionRows += 1;
     }
   }
 
@@ -635,11 +725,24 @@ function runAlignment(samples, dance, config, anchorForRow, bandFrames) {
   const alignedFrame = frames[lastJ] ?? null;
   const rawScore = scoreSum / informativeRows;
 
+  // Anti-idle: how much did the player actually move, relative to what the
+  // choreography demanded over this window?
+  let motionRatio = null;
+  let motionPenalty = 1;
+  if (motionRows > 0) {
+    const refMotionMean = refMotionSum / motionRows;
+    if (refMotionMean >= config.motionPenaltyMinRefDegPerSec) {
+      motionRatio = (liveMotionSum / motionRows) / refMotionMean;
+      motionPenalty = clamp(motionRatio / config.motionRatioFloor, 0, 1);
+    }
+  }
+
   return {
     id: dance.id,
     title: dance.title,
-    score: toDisplayScore(rawScore, config),
+    score: round(toDisplayScore(rawScore, config) * motionPenalty, 1),
     rawScore: round(rawScore, 1),
+    motionRatio: motionRatio === null ? null : round(motionRatio, 2),
     staticScore: round(staticSum / informativeRows, 1),
     dynamicScore: dynCount > 0 ? round(dynSum / dynCount, 1) : null,
     mirrored: false,

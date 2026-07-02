@@ -12,22 +12,22 @@ const ControlButtons = memo(function ControlButtons({
   activeFeature,
 }) {
   const btnBase =
-    "group flex items-center justify-center p-3 sm:p-4 rounded-xl font-bold transition-all duration-200 active:scale-95 shadow-lg border";
+    "group flex items-center justify-center p-3 sm:p-4 rounded-xl font-bold transition-all duration-200 active:scale-95 shadow-lg";
 
   const btnPrimary =
-    "bg-gray-700/50 hover:bg-gray-700 text-violet-300 border-violet-500/30 hover:border-violet-500/60 hover:shadow-violet-500/10";
+    "btn-primary text-white";
 
   const btnActive =
-    "bg-red-500/10 hover:bg-red-500/20 text-red-400 border-red-500/30 hover:border-red-500/60";
+    "btn-danger text-white";
 
   const btnSecondary =
-    "bg-gray-700/30 hover:bg-gray-700 text-gray-300 border-gray-600/30 hover:border-gray-500 hover:text-white";
+    "btn-secondary text-white";
 
   return (
-    <div className="container bg-gray-800 rounded-2xl shadow-xl p-5 mb-6 border border-gray-700">
-      <div className="flex items-center justify-between mb-5 border-b border-gray-700 pb-3">
-        <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-          <span className="w-2 h-6 bg-violet-500 rounded-full inline-block"></span>
+    <div className="container p-5 mb-6">
+      <div className="flex items-center justify-between mb-5 border-b border-violet-500/25 pb-3">
+        <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2 font-display text-cyan-neon">
+          <span className="w-2.5 h-6 bg-gradient-to-b from-cyan-400 to-blue-500 rounded-full inline-block"></span>
           Controls
         </h2>
       </div>

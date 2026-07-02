@@ -373,6 +373,37 @@ function createDebugTargetPrediction(
 let mirrorCanvas = null;
 let mirrorCtx = null;
 
+const RainbowText = ({ text }) => {
+  const colors = [
+    "text-neon-pink",
+    "text-neon-blue",
+    "text-neon-yellow",
+    "text-neon-purple",
+    "text-neon-green",
+    "text-neon-orange",
+  ];
+  return (
+    <span className="font-display inline-block">
+      {text.split("").map((char, index) => {
+        if (char === " ") return <span key={index}>&nbsp;</span>;
+        const colorClass = colors[index % colors.length];
+        return (
+          <span
+            key={index}
+            className={`${colorClass} inline-block animate-float font-black`}
+            style={{
+              animationDelay: `${index * 0.08}s`,
+              textShadow: "0 0 8px currentColor, 0 2px 4px rgba(0,0,0,0.8)",
+            }}
+          >
+            {char}
+          </span>
+        );
+      })}
+    </span>
+  );
+};
+
 function App() {
   const [processingStatus, setProcessingStatus] = useState({
     warnUpTime: 0,
@@ -1538,6 +1569,11 @@ function App() {
       setSequenceSampleCount(0);
       liveSequenceRef.current = [];
       setPerformanceRating({ text: "PRET", color: "text-slate-400" });
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch((err) => {
+          console.warn("Could not exit fullscreen:", err);
+        });
+      }
       return;
     }
 
@@ -1565,6 +1601,11 @@ function App() {
       setGameState("waiting_for_person");
       setPerformanceRating({ text: "ATTENTE", color: "text-amber-500 font-bold animate-pulse" });
       setCoachComments(["Caméra activée. Présentez-vous devant l'écran pour lancer la détection."]);
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch((err) => {
+          console.warn("Could not enter fullscreen:", err);
+        });
+      }
     }
   }, [activeFeature, closeCamera, getCameras, openCamera, stopMediaLoop, stopVideo]);
 
@@ -1580,18 +1621,204 @@ function App() {
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 text-white min-h-screen flex flex-col gap-6">
       <header className="text-center">
-        <h1 className="text-4xl md:text-5xl font-extrabold tracking-wider uppercase bg-gradient-to-r from-violet-400 via-fuchsia-500 to-violet-600 bg-clip-text text-transparent text-violet-neon">
-          Just Dance Captor
+        <h1 className="text-4xl md:text-6xl font-extrabold tracking-wider uppercase">
+          <RainbowText text="Just Dance Captor" />
         </h1>
         <p className="text-slate-400 text-sm mt-2">
           Compare les mouvements camera avec le catalogue extrait de tes videos.
         </p>
       </header>
 
-      <main className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] gap-6 items-start">
-        <div className="flex flex-col gap-4">
-          <section className="relative">
-          <ImageDisplay
+      {activeFeature === "camera" ? (
+        /* Immersive Focused Layout for Camera */
+        <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto animate-fade-in">
+          {/* Main video element section */}
+          <section className="relative w-full">
+            <ImageDisplay
+              cameraRef={cameraRef}
+              videoRef={videoRef}
+              imgRef={imgRef}
+              overlayRef={overlayRef}
+              imgSrc={imgSrc}
+              videoSrc={videoSrc}
+              onCameraLoad={handleCameraLoad}
+              onVideoLoad={handleVideoLoad}
+              onVideoPlay={handleVideoPlay}
+              onVideoPause={handleVideoPause}
+              onVideoSeeked={handleVideoSeeked}
+              onVideoEnded={handleVideoEnded}
+              onImageLoad={imageLoad}
+              activeFeature={activeFeature}
+              audioTimeLeft={audioTimeLeft}
+            />
+
+            {/* Countdown HUD for camera */}
+            {gameState === "countdown" && (
+              <div 
+                className={`absolute inset-0 flex items-center justify-center flex-col rounded-2xl z-50 transition-all duration-1000 ${
+                  countdown <= 2 
+                    ? "bg-[#050414]/0 opacity-0 pointer-events-none" 
+                    : "bg-[#050414] opacity-100"
+                }`}
+              >
+                <span className={`text-9xl md:text-11xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-pink-500 to-cyan-400 animate-bounce font-display transition-all duration-1000 ${
+                  countdown <= 2 ? "opacity-0 scale-75" : "opacity-100 scale-100"
+                }`}>
+                  {countdown}
+                </span>
+                <span className={`text-2xl uppercase font-black text-white tracking-widest mt-4 font-display transition-all duration-1000 ${
+                  countdown <= 2 ? "opacity-0" : "opacity-100"
+                }`}>
+                  Préparez-vous !
+                </span>
+              </div>
+            )}
+
+            {/* Loading spinner */}
+            {activeFeature === "loading" && (
+              <div className="absolute inset-0 bg-black/70 flex items-center justify-center flex-col gap-3 rounded-2xl z-50 animate-fade-in">
+                <div className="w-12 h-12 border-4 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-violet-300 font-bold">Chargement du modele...</span>
+              </div>
+            )}
+
+            {/* High precision analysis banner */}
+            {gameState === "analyzing" && (
+              <div className="absolute bottom-4 left-4 right-4 bg-black/85 backdrop-blur-md flex items-center justify-between gap-4 rounded-xl p-4 border border-violet-500/30 shadow-[0_0_30px_rgba(139,92,246,0.3)] z-50 animate-fade-in">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 border-4 border-t-fuchsia-500 border-r-fuchsia-500 border-b-violet-500 border-l-violet-500 rounded-full animate-spin flex-shrink-0"></div>
+                  <div className="text-left">
+                    <h2 className="text-sm font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-500 uppercase tracking-wider">
+                      Analyse Haute Précision
+                    </h2>
+                    <p className="text-slate-300 text-xs mt-0.5 font-semibold line-clamp-1">{preciseAnalysisStatus}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 flex-1 max-w-xs justify-end">
+                  <div className="w-full bg-[#050818]/80 rounded-full h-2 overflow-hidden border border-violet-500/20 shadow-inner">
+                    <div 
+                      className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-full rounded-full transition-all duration-300"
+                      style={{ width: `${preciseAnalysisProgress}%` }}
+                    ></div>
+                  </div>
+                  <span className="text-xs text-violet-300 font-bold tracking-wider flex-shrink-0">{preciseAnalysisProgress}%</span>
+                </div>
+              </div>
+            )}
+
+            {/* Pause screen with silhouette replay */}
+            {gameState === "pause" && lastDanceInfo && (
+              <div className="absolute inset-0 bg-black/90 backdrop-blur-md flex flex-col md:flex-row items-center justify-center gap-8 rounded-2xl p-6 text-center animate-fade-in border border-violet-500/30 shadow-[0_0_50px_rgba(139,92,246,0.3)] z-50 overflow-y-auto">
+                <div className="flex flex-col items-center gap-4 animate-fade-in">
+                  <div className="animate-bounce">
+                    <span className="text-5xl">🏆</span>
+                  </div>
+                  <div>
+                    <h2 className="text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-fuchsia-500 uppercase tracking-widest text-violet-neon">
+                      Musique Terminée !
+                    </h2>
+                    <p className="text-slate-300 text-sm mt-1 font-semibold max-w-[285px] truncate">{lastDanceInfo.title}</p>
+                  </div>
+
+                  <div className="bg-[#050818]/60 border border-violet-500/30 rounded-2xl px-6 py-4 shadow-inner flex flex-col items-center gap-1 min-w-[200px]">
+                    <span className="text-[10px] uppercase tracking-wider text-violet-400 font-bold">Votre Score</span>
+                    <span className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-emerald-400 animate-pulse font-display">
+                      {lastDanceInfo.score}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-400 mt-1">
+                      {lastDanceInfo.rank === "A" ? "🔥 RANG A - SUPER STAR !" :
+                       lastDanceInfo.rank === "B" ? "✨ RANG B - TRÈS BIEN !" :
+                                                    "👍 RANG C - BIEN JOUÉ !"}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col items-center gap-1 mt-1">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Prochaine danse dans</span>
+                    <div className="flex items-center justify-center w-10 h-10 rounded-full border-2 border-fuchsia-500 text-fuchsia-400 font-black text-lg bg-fuchsia-500/10 shadow-[0_0_15px_rgba(217,70,239,0.4)]">
+                      {pauseCountdown}
+                    </div>
+                  </div>
+                </div>
+
+                {poseReplayFrames.length > 0 && (
+                  <PoseReplayCanvas frames={poseReplayFrames} />
+                )}
+              </div>
+            )}
+          </section>
+
+          {/* Dedicated Game HUD Panel */}
+          <div className="card-violet w-full flex flex-col md:flex-row gap-6 items-center justify-between shadow-[0_0_45px_rgba(255,0,127,0.25)] border-2 border-fuchsia-500/50">
+            {/* Column 1: Info & Controls */}
+            <div className="flex flex-col gap-2 flex-1 w-full text-center md:text-left">
+              <span className="text-xs uppercase tracking-wider text-slate-400 font-bold">
+                Chanson en cours
+              </span>
+              <h2 className="text-2xl font-black text-white truncate max-w-xs md:max-w-md font-display text-cyan-neon">
+                {selectedDanceId
+                  ? catalogue?.dances?.find((d) => d.id === selectedDanceId)?.title ?? "Détection..."
+                  : "Sélectionnez une danse..."}
+              </h2>
+              <button
+                onClick={toggleCamera}
+                className="btn-danger mt-2 py-2.5 px-5 text-sm font-bold shadow-md rounded-xl cursor-pointer self-center md:self-start"
+              >
+                Quitter la danse
+              </button>
+            </div>
+
+            {/* Column 2: Live Evolution Sparkline */}
+            <div className="flex-1 w-full flex flex-col gap-2 items-center">
+              <span className="text-xs uppercase tracking-wider text-slate-400 font-bold">
+                Évolution de la précision
+              </span>
+              <div className="flex items-end gap-1.5 h-16 w-full bg-[#050818]/60 border border-violet-500/20 rounded-xl p-2.5 overflow-hidden justify-center relative shadow-inner">
+                {sessionPrecisionsRef.current.length === 0 ? (
+                  <span className="text-xs text-slate-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 italic">
+                    Commencez à danser...
+                  </span>
+                ) : (
+                  sessionPrecisionsRef.current.slice(-35).map((p, idx) => (
+                    <div
+                      key={idx}
+                      className="w-2.5 rounded-t-sm transition-all duration-300"
+                      style={{
+                        height: `${p}%`,
+                        background: p > 60 
+                          ? "linear-gradient(to top, #10b981, #34d399)" 
+                          : p >= 45 
+                            ? "linear-gradient(to top, #f59e0b, #fbbf24)" 
+                            : "linear-gradient(to top, #ef4444, #f87171)",
+                        boxShadow: `0 0 6px ${p > 60 ? '#10b981' : p >= 45 ? '#f59e0b' : '#ef4444'}`
+                      }}
+                    />
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Column 3: Live Score Badges */}
+            <div className="flex flex-row md:flex-col gap-4 shrink-0 w-full md:w-auto items-center justify-around">
+              <div className="bg-[#050818]/70 border border-violet-500/25 rounded-xl p-3.5 flex flex-col items-center min-w-[120px] shadow-inner">
+                <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Précision</span>
+                <span className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 mt-1 animate-pulse font-display">
+                  {Math.round(dancePrecision)}%
+                </span>
+              </div>
+              <div className="bg-[#050818]/70 border border-violet-500/25 rounded-xl p-3.5 flex flex-col items-center min-w-[120px] shadow-inner">
+                <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Score Global</span>
+                <span className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 to-pink-500 mt-1 font-display">
+                  {danceScore}%
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <main className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] gap-6 items-start">
+          <div className="flex flex-col gap-4">
+            <section className="relative">
+              <ImageDisplay
             cameraRef={cameraRef}
             videoRef={videoRef}
             imgRef={imgRef}
@@ -1723,8 +1950,8 @@ function App() {
         </section>
 
         <div className="card-violet flex flex-col gap-3">
-          <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
-            Commandes
+          <h2 className="text-lg font-bold border-b border-violet-500/20 pb-2">
+            <RainbowText text="Commandes" />
           </h2>
           <input
             ref={fileVideoRef}
@@ -1798,8 +2025,8 @@ function App() {
 
         <div className="card-violet flex flex-col gap-3">
           <div className="flex items-center justify-between border-b border-violet-500/20 pb-2">
-            <h2 className="text-lg font-bold text-violet-300">
-              Historique des Scores
+            <h2 className="text-lg font-bold">
+              <RainbowText text="Historique des Scores" />
             </h2>
             {scoreHistory.length > 0 && (
               <button
@@ -1918,8 +2145,8 @@ function App() {
           </div>
 
           <div className="card-violet">
-            <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
-              Catalogue local
+            <h2 className="text-lg font-bold border-b border-violet-500/20 pb-2">
+              <RainbowText text="Catalogue local" />
             </h2>
             <p
               className={`text-sm mt-3 ${
@@ -1959,8 +2186,8 @@ function App() {
           </div>
 
           <div className="card-violet">
-            <h2 className="text-lg font-bold text-violet-300 border-b border-violet-500/20 pb-2">
-              Candidats instantanes
+            <h2 className="text-lg font-bold border-b border-violet-500/20 pb-2">
+              <RainbowText text="Candidats instantanes" />
             </h2>
             <div className="mt-4 flex flex-col gap-3">
               {instantCandidates.length === 0 ? (
@@ -1996,41 +2223,42 @@ function App() {
           </div>
         </aside>
       </main>
+      )}
 
-      <PoseOverlayTool catalogue={catalogue} />
+      {activeFeature !== "camera" && <PoseOverlayTool catalogue={catalogue} />}
 
+      {activeFeature !== "camera" && (
+        <footer className="mt-2 border-t border-violet-500/10 pt-4 flex flex-col items-center">
+          <button
+            onClick={() => setShowAdvancedSettings((value) => !value)}
+            className="text-xs text-violet-400 hover:text-violet-300 transition-colors underline cursor-pointer"
+          >
+            {showAdvancedSettings ? "Hide advanced settings" : "Show advanced settings"}
+          </button>
 
-
-      <footer className="mt-2 border-t border-violet-500/10 pt-4 flex flex-col items-center">
-        <button
-          onClick={() => setShowAdvancedSettings((value) => !value)}
-          className="text-xs text-violet-400 hover:text-violet-300 transition-colors underline cursor-pointer"
-        >
-          {showAdvancedSettings ? "Hide advanced settings" : "Show advanced settings"}
-        </button>
-
-        {showAdvancedSettings && (
-          <div className="w-full mt-4 animate-details-show">
-            <SettingsPanel
-              cameraSelectorRef={cameraSelectorRef}
-              imgszTypeSelectorRef={imgszTypeSelectorRef}
-              modelConfigRef={modelConfigRef}
-              defaultModelConfig={DEFAULT_MODEL_CONFIG}
-              customClasses={customClasses}
-              cameras={cameras}
-              activeFeature={activeFeature}
-              defaultClasses={classes}
-              loadModel={loadModel}
-            />
-            <ModelStatus
-              warnUpTime={processingStatus.warnUpTime}
-              inferenceTime={processingStatus.inferenceTime}
-              statusMsg={processingStatus.statusMsg}
-              statusColor={processingStatus.statusColor}
-            />
-          </div>
-        )}
-      </footer>
+          {showAdvancedSettings && (
+            <div className="w-full mt-4 animate-details-show">
+              <SettingsPanel
+                cameraSelectorRef={cameraSelectorRef}
+                imgszTypeSelectorRef={imgszTypeSelectorRef}
+                modelConfigRef={modelConfigRef}
+                defaultModelConfig={DEFAULT_MODEL_CONFIG}
+                customClasses={customClasses}
+                cameras={cameras}
+                activeFeature={activeFeature}
+                defaultClasses={classes}
+                loadModel={loadModel}
+              />
+              <ModelStatus
+                warnUpTime={processingStatus.warnUpTime}
+                inferenceTime={processingStatus.inferenceTime}
+                statusMsg={processingStatus.statusMsg}
+                statusColor={processingStatus.statusColor}
+              />
+            </div>
+          )}
+        </footer>
+      )}
     </div>
   );
 }

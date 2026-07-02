@@ -13,16 +13,12 @@ const KP = {
   rightAnkle: 16,
 };
 
-// Only these 12 body joints are used for scoring (head/face excluded)
+// Only these 8 body joints are used for scoring (head/face/shoulders/hips excluded)
 const SCORING_KP_INDICES = new Set([
-  5,  // leftShoulder  — épaule gauche
-  6,  // rightShoulder — épaule droite
   7,  // leftElbow     — coude gauche
   8,  // rightElbow    — coude droit
   9,  // leftWrist     — main gauche
   10, // rightWrist    — main droite
-  11, // leftHip       — hanche gauche
-  12, // rightHip      — hanche droite
   13, // leftKnee      — genou gauche
   14, // rightKnee     — genou droit
   15, // leftAnkle     — pied gauche
@@ -32,10 +28,6 @@ const SCORING_KP_INDICES = new Set([
 const ANGLE_NAMES = [
   "leftElbow",
   "rightElbow",
-  "leftShoulder",
-  "rightShoulder",
-  "leftHip",
-  "rightHip",
   "leftKnee",
   "rightKnee",
 ];

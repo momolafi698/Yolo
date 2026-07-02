@@ -18,11 +18,11 @@ const ImageDisplay = memo(function ImageDisplay({
   audioTimeLeft,
 }) {
   return (
-    <div className="container bg-gray-800 rounded-2xl shadow-xl border border-gray-700 p-5 mb-6 relative min-h-[400px] flex flex-col">
+    <div className="container p-5 mb-6 relative min-h-[400px] flex flex-col">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-4">
-          <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-            <span className="w-2 h-6 bg-violet-500 rounded-full inline-block"></span>
+          <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2 font-display text-violet-neon">
+            <span className="w-2.5 h-6 bg-gradient-to-b from-fuchsia-500 to-pink-500 rounded-full inline-block"></span>
             Preview
           </h2>
           {audioTimeLeft !== null && audioTimeLeft !== undefined && (

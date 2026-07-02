@@ -1,19 +1,40 @@
 @import "tailwindcss";
 
+@theme {
+  --font-sans: "Outfit", sans-serif;
+  --font-display: "Lilita One", sans-serif;
+  --font-righteous: "Righteous", sans-serif;
+  
+  --color-neon-pink: #ff007f;
+  --color-neon-purple: #9d00ff;
+  --color-neon-blue: #00f0ff;
+  --color-neon-yellow: #fffb00;
+  --color-neon-green: #39ff14;
+  --color-neon-orange: #ff5f00;
+}
+
 :root {
   color-scheme: dark;
-  color: #f1f5f9;
-  background-color: #080d24; /* Bleu foncé technologique */
+  color: #ffffff;
+  background-color: #050414;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
 body {
   display: flex;
   justify-content: center;
   text-align: center;  
-  @apply leading-relaxed tracking-wide font-sans bg-[#080d24] text-slate-100;
+  @apply leading-relaxed tracking-wide font-sans text-slate-100;
+  background-color: #050414;
+  background-image: 
+    radial-gradient(at 5% 15%, rgba(255, 0, 127, 0.2) 0px, transparent 45%),
+    radial-gradient(at 95% 10%, rgba(0, 240, 255, 0.2) 0px, transparent 45%),
+    radial-gradient(at 50% 85%, rgba(157, 0, 255, 0.25) 0px, transparent 50%);
+  background-attachment: fixed;
+  background-size: cover;
 }
 

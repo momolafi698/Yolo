@@ -39,11 +39,11 @@ const SettingsPanel = memo(function SettingsPanel({
   return (
     <div
       id="setting-container"
-      className="container bg-gray-800 rounded-2xl shadow-xl p-5 mb-6 border border-gray-700"
+      className="container p-5 mb-6"
     >
-      <div className="flex items-center justify-between mb-5 border-b border-gray-700 pb-3">
-        <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-          <span className="w-2 h-6 bg-violet-500 rounded-full inline-block"></span>
+      <div className="flex items-center justify-between mb-5 border-b border-violet-500/25 pb-3">
+        <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2 font-display text-yellow-neon">
+          <span className="w-2.5 h-6 bg-gradient-to-b from-yellow-300 to-amber-500 rounded-full inline-block"></span>
           Settings
         </h2>
         {activeFeature && (

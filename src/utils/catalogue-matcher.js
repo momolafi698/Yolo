@@ -192,6 +192,19 @@ const DEFAULT_OPTIONS = {
   // video; moving with the routine at ~half amplitude should not be
   // punished - only genuinely standing still should.
   motionRatioFloor: 0.45,
+  // Routine-correlation term: over the whole window, each bone's angle
+  // series (live vs reference at the audio-clock alignment) is correlated -
+  // "does your arm rise when the reference arm rises". This is the most
+  // camera- and skill-robust "you are dancing THIS routine" signal on real
+  // recordings: it's invariant to dancing smaller, to constant perspective
+  // offsets, and a frozen player correlates at ~0. Only bones the reference
+  // actually articulates (std above routineMinRefStdDeg) participate.
+  // routineCorrelationWeight is its share of the window's raw score;
+  // correlation r maps to 0..100 via r / routineCorrelationCeil.
+  routineCorrelationWeight: 0.25,
+  routineMinRefStdDeg: 12,
+  routineCorrelationCeil: 0.5,
+  routineLagScanSeconds: 0.6,
   motionPenaltyMinRefDegPerSec: 12,
   // Live pose estimates jitter, and differentiating jitter looks like ~10
   // deg/s of motion even on a player standing perfectly still. Deducted
@@ -204,11 +217,15 @@ const DEFAULT_OPTIONS = {
   // scoreCeil to 100%. Calibrated with `npm run evaluate:matcher` so that
   // cross-dance (wrong dance) raw scores land near 0-25% displayed and
   // heavily-perturbed correct dancing lands above ~60%.
-  scoreFloor: 78,
-  scoreCeil: 96,
+  // Calibrated on REAL ground truth (scripts/calibrate-real.js: the
+  // karisma-* player recordings vs their poses_original targets), not on
+  // synthetic noise: real matched dancing sits at raw ~70-90, real
+  // wrong-dance at raw ~54-69. Re-run that script after any scoring change.
+  scoreFloor: 56,
+  scoreCeil: 82,
   // Concave display curve exponent (see toDisplayScore); < 1 lifts the
   // mid-range so decent-but-human dancing reads as a motivating score.
-  displayGamma: 0.7,
+  displayGamma: 0.75,
 };
 
 function mergeConfig(options) {
@@ -747,6 +764,76 @@ function alignFallbackSequence(samples, dance, config) {
   return best ?? emptySequenceResult(dance);
 }
 
+function signedAngleDiff(a, b) {
+  let d = a - b;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+// Weighted mean Pearson correlation between live and reference bone-angle
+// series over the window, for bones the reference actually articulates.
+// A single global lag (the same for all bones - the whole body is late
+// together) is scanned over +/-routineLagScanSeconds and the best kept:
+// a real dancer's lag varies take to take, while a WRONG dance correlates
+// near zero at every lag, so the scan only lifts genuine matches.
+// Returns null when nothing was comparable (e.g. the reference holds still
+// for the whole window).
+function routineCorrelation(samples, frames, anchorTimeForRow, rowUsable, config) {
+  const lagStep = 0.15;
+  const maxLag = config.routineLagScanSeconds;
+
+  let best = null;
+  for (let lag = -maxLag; lag <= maxLag + 1e-9; lag += lagStep) {
+    let sum = 0;
+    let weightSum = 0;
+
+    for (const bone of BONES) {
+      const live = [];
+      const ref = [];
+      for (let i = 0; i < samples.length; i++) {
+        if (!rowUsable[i]) continue;
+        const liveBone = samples[i].bones[bone.name];
+        const refBone = frames[nearestFrameIndex(frames, anchorTimeForRow(i) + lag)]?.bones[bone.name];
+        if (!liveBone || !refBone) continue;
+        live.push(Math.atan2(liveBone.y, liveBone.x));
+        ref.push(Math.atan2(refBone.y, refBone.x));
+      }
+      if (live.length < 15) continue;
+
+      // Unwrap so a bone sweeping through +/-180deg stays continuous.
+      for (let i = 1; i < live.length; i++) {
+        live[i] = live[i - 1] + signedAngleDiff(live[i], live[i - 1]);
+        ref[i] = ref[i - 1] + signedAngleDiff(ref[i], ref[i - 1]);
+      }
+
+      const meanLive = live.reduce((a, b) => a + b, 0) / live.length;
+      const meanRef = ref.reduce((a, b) => a + b, 0) / ref.length;
+      let num = 0;
+      let varLive = 0;
+      let varRef = 0;
+      for (let i = 0; i < live.length; i++) {
+        num += (live[i] - meanLive) * (ref[i] - meanRef);
+        varLive += (live[i] - meanLive) ** 2;
+        varRef += (ref[i] - meanRef) ** 2;
+      }
+
+      const refStdDeg = Math.sqrt(varRef / ref.length) * (180 / Math.PI);
+      if (refStdDeg < config.routineMinRefStdDeg || varLive <= 0 || varRef <= 0) continue;
+
+      sum += (num / Math.sqrt(varLive * varRef)) * bone.weight;
+      weightSum += bone.weight;
+    }
+
+    if (weightSum > 0) {
+      const r = sum / weightSum;
+      if (best === null || r > best) best = r;
+    }
+  }
+
+  return best;
+}
+
 function runAlignment(samples, dance, config, anchorTimeForRow, bandFrames) {
   const frames = dance.frames;
   const cellCache = new Map();
@@ -841,7 +928,16 @@ function runAlignment(samples, dance, config, anchorTimeForRow, bandFrames) {
 
   const [, lastJ] = alignment.path.at(-1);
   const alignedFrame = frames[lastJ] ?? null;
-  const rawScore = scoreSum / informativeRows;
+  const frameRaw = scoreSum / informativeRows;
+
+  // Window-level routine correlation, blended into the raw score. Computed
+  // at the clock alignment (not the DTW path - the path would align away
+  // exactly the timing structure the correlation is meant to measure).
+  const correlation = routineCorrelation(samples, frames, anchorTimeForRow, rowUsable, config);
+  const rawScore = correlation === null
+    ? frameRaw
+    : frameRaw * (1 - config.routineCorrelationWeight) +
+      100 * clamp(correlation / config.routineCorrelationCeil, 0, 1) * config.routineCorrelationWeight;
 
   // Anti-idle: how much did the player actually move, relative to what the
   // choreography demanded over this window? Medians, not means - a single
@@ -866,6 +962,7 @@ function runAlignment(samples, dance, config, anchorTimeForRow, bandFrames) {
     title: dance.title,
     score: round(toDisplayScore(rawScore, config) * motionPenalty, 1),
     rawScore: round(rawScore, 1),
+    correlation: correlation === null ? null : round(correlation, 2),
     motionRatio: motionRatio === null ? null : round(motionRatio, 2),
     staticScore: round(staticSum / informativeRows, 1),
     dynamicScore: dynCount > 0 ? round(dynSum / dynCount, 1) : null,

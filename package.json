@@ -11,6 +11,7 @@
     "extract:poses": "node scripts/extract-poses.js",
     "extract:audio": "node scripts/extract-audio.js",
     "evaluate:matcher": "node scripts/evaluate-matcher.js",
+    "calibrate:real": "node scripts/calibrate-real.js",
     "preview": "vite preview",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"

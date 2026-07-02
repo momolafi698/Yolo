@@ -18,7 +18,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, "..");
 
 const DEFAULTS = {
-  catalogueDir: "public/catalogue/poses",
+  // The reference dances live in poses_original; public/catalogue/poses
+  // itself holds the player's recorded performances (karisma-*), which are
+  // ground truth for scripts/calibrate-real.js, not synthetic evaluation.
+  catalogueDir: "public/catalogue/poses/poses_original",
   windowSeconds: 3,
   trueStepSeconds: 2,
   falseStepSeconds: 4,
